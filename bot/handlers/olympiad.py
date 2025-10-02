@@ -138,14 +138,19 @@ async def process_grade_selection(callback: CallbackQuery, state: FSMContext):
             session, student.id, session_id, selected_grade, code
         )
         
+        # Первое сообщение - информация
         await callback.message.answer(
             f"✅ Твой код для олимпиады по предмету {olympiad_session.subject}:\n\n"
-            f"📋 Класс: {selected_grade}\n"
-            f"🔑 Код: `{code}`\n\n"
+            f"📋 Класс: {selected_grade}\n\n"
             f"⚠️ ВАЖНО: После завершения работы обязательно пришли в бот "
             f"скриншот или фотографию последней страницы!\n\n"
-            f"💡 Просто отправь фото в этот чат.",
-            parse_mode="Markdown"
+            f"💡 Просто отправь фото в этот чат."
+        )
+        
+        # Второе сообщение - только код для удобного копирования
+        await callback.message.answer(
+            f"🔑 <code>{code}</code>",
+            parse_mode="HTML"
         )
         
         await callback.answer("✅ Код получен!")
@@ -199,10 +204,15 @@ async def cmd_my_status(message: Message):
                 f"✅ Зарегистрирован\n\n"
                 f"📚 Олимпиада: {active_session.subject}\n"
                 f"📋 Класс: {code_request.grade}\n"
-                f"🔑 Код: `{code_request.code}`\n"
                 f"📸 Скриншот: {screenshot_status}\n\n"
-                f"{'⚠️ Не забудь прислать скриншот завершенной работы!' if not code_request.screenshot_submitted else ''}",
-                parse_mode="Markdown"
+                f"{'⚠️ Не забудь прислать скриншот завершенной работы!' if not code_request.screenshot_submitted else ''}\n"
+                f"🔑 Твой код:\n\n"
+            )
+            
+            # Отправляем код отдельным сообщением
+            await message.answer(
+                f"<code>{code_request.code}</code>",
+                parse_mode="HTML"
             )
 
 
