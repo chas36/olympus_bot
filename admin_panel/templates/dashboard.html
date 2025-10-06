@@ -364,9 +364,19 @@
             new bootstrap.Modal(document.getElementById('screenshotModal')).show();
         }
 
-        // Экспорт в CSV
-        function exportToCSV() {
-            window.location.href = '/admin/export/students';
+        // Экспорт в CSV с проверкой аутентификации
+        async function exportToCSV() {
+            try {
+                const authResponse = await fetch('/admin/check-auth', { credentials: 'include' });
+                const authResult = await authResponse.json();
+                if (authResult.authenticated) {
+                    window.location.href = '/admin/export/students';
+                } else {
+                    alert('Для экспорта данных необходимо войти в систему.');
+                }
+            } catch (error) {
+                alert('Ошибка проверки аутентификации: ' + error.message);
+            }
         }
     </script>
 </body>

@@ -86,6 +86,7 @@ class ThrottlingMiddleware(BaseMiddleware):
         """
         self.rate_limit = rate_limit
         self.user_timestamps: Dict[int, float] = {}
+        self.ttl = self.rate_limit * 10  # Time-to-live for user timestamps
         super().__init__()
     
     async def __call__(
@@ -98,6 +99,14 @@ class ThrottlingMiddleware(BaseMiddleware):
         
         user_id = event.from_user.id
         current_time = time.time()
+
+        # Cleanup old entries
+        expired_users = [
+            uid for uid, ts in self.user_timestamps.items()
+            if current_time - ts > self.ttl
+        ]
+        for uid in expired_users:
+            del self.user_timestamps[uid]
         
         # Проверяем последнее время обращения
         if user_id in self.user_timestamps:

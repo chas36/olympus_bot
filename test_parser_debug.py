@@ -8,6 +8,9 @@
     python test_parser_debug.py "8И.docx"
 """
 
+# Критерии валидации кода ученика
+CODE_VALIDATION_CRITERIA = ['/', 'sbph']
+
 import sys
 from parser.docx_parser import parse_olympiad_file
 
@@ -76,7 +79,7 @@ def main():
         invalid_codes_8 = []
         for student in result['grade8_codes']:
             code = student['code']
-            if not code or not any(c in code for c in ['/', 'sbph']):
+            if not code or not any(c in code for c in CODE_VALIDATION_CRITERIA):
                 invalid_codes_8.append(student['full_name'])
         
         if invalid_codes_8:

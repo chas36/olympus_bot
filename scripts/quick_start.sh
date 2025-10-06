@@ -119,9 +119,19 @@ elif [ "$choice" = "2" ]; then
     read -sp "Пароль: " db_password
     echo ""
     
-    # Обновляем .env
-    sed -i.bak "s|DATABASE_URL=.*|DATABASE_URL=postgresql+asyncpg://${db_user}:${db_password}@${db_host}:${db_port}/olympus_bot|g" .env
-    sed -i.bak "s|DATABASE_URL_SYNC=.*|DATABASE_URL_SYNC=postgresql://${db_user}:${db_password}@${db_host}:${db_port}/olympus_bot|g" .env
+    # Обновляем .env безопасно, не раскрывая пароль в командной строке
+    export db_user db_password db_host db_port
+    tmp_env=$(mktemp)
+    awk -v db_user="$db_user" -v db_password="$db_password" -v db_host="$db_host" -v db_port="$db_port" '
+    BEGIN {
+        url_async="DATABASE_URL=postgresql+asyncpg://" db_user ":" db_password "@" db_host ":" db_port "/olympus_bot"
+        url_sync="DATABASE_URL_SYNC=postgresql://" db_user ":" db_password "@" db_host ":" db_port "/olympus_bot"
+    }
+    /^DATABASE_URL=/{print url_async; next}
+    /^DATABASE_URL_SYNC=/{print url_sync; next}
+    {print}
+    ' .env > "$tmp_env" && mv "$tmp_env" .env
+    unset db_password
     
     echo "🗄️  Инициализация базы данных..."
     python main.py init
