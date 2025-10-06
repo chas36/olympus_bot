@@ -203,9 +203,11 @@ async def generate_excel_report(session_id: int = None, output_file: str = None)
             
             # Автоматическая настройка ширины колонок
             worksheet = writer.sheets['Отчет']
+            # Efficiently set column widths using vectorized operations
             for idx, col in enumerate(df.columns):
-                max_length = max(df[col].astype(str).apply(len).max(), len(col)) + 2
-                worksheet.column_dimensions[chr(65 + idx)].width = max_length
+                max_length = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
+                col_letter = worksheet.cell(row=1, column=idx + 1).column_letter
+                worksheet.column_dimensions[col_letter].width = max_length
         
         print(f"✅ Отчет сохранен: {output_file}")
 

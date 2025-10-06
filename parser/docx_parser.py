@@ -6,6 +6,8 @@ from datetime import datetime
 
 class OlympiadDocParser:
     """Парсер .docx файлов с кодами олимпиады"""
+
+    SUBJECTS = ['физика', 'математика', 'химия', 'биология', 'информатика']
     
     def __init__(self, file_path: str):
         self.file_path = file_path
@@ -63,9 +65,10 @@ class OlympiadDocParser:
         for paragraph in self.document.paragraphs:
             text = paragraph.text.strip()
             # Паттерн для поиска предмета
-            if text and any(word in text.lower() for word in ['физика', 'математика', 'химия', 'биология', 'информатика']):
+            if text and any(word in text.lower() for word in self.SUBJECTS):
                 # Извлекаем название предмета
-                match = re.search(r'(Физика|Математика|Химия|Биология|Информатика)', text, re.IGNORECASE)
+                pattern = r'(' + '|'.join([s.capitalize() for s in self.SUBJECTS]) + ')'
+                match = re.search(pattern, text, re.IGNORECASE)
                 if match:
                     return match.group(1).capitalize()
         
@@ -75,7 +78,8 @@ class OlympiadDocParser:
                 first_row = table.rows[0]
                 for cell in first_row.cells:
                     text = cell.text.strip()
-                    match = re.search(r'(Физика|Математика|Химия|Биология|Информатика)', text, re.IGNORECASE)
+                    pattern = r'(' + '|'.join([s.capitalize() for s in self.SUBJECTS]) + ')'
+                    match = re.search(pattern, text, re.IGNORECASE)
                     if match:
                         return match.group(1).capitalize()
         
@@ -96,7 +100,7 @@ class OlympiadDocParser:
             cells = row.cells
             # Ищем строку где есть "№" или "ФИО" или название предмета
             row_text = ''.join(cell.text for cell in cells).lower()
-            if '№' in row_text or 'фио' in row_text or 'физика' in row_text or 'математика' in row_text:
+            if '№' in row_text or 'фио' in row_text or any(subject in row_text for subject in self.SUBJECTS):
                 header_row_index = i
                 break
         

@@ -4,10 +4,14 @@
 
 from aiogram import Bot
 import os
+import logging
 from dotenv import load_dotenv
 from typing import List, Dict
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
 
@@ -30,7 +34,7 @@ async def notify_admin_new_session(bot: Bot, subject: str, grade8_count: int, gr
     try:
         await bot.send_message(ADMIN_TELEGRAM_ID, message, parse_mode="HTML")
     except Exception as e:
-        print(f"Ошибка отправки уведомления администратору: {e}")
+        logger.error(f"Ошибка отправки уведомления администратору: {e}")
 
 
 async def notify_admin_code_requested(bot: Bot, student_name: str, grade: int, subject: str):
@@ -50,7 +54,7 @@ async def notify_admin_code_requested(bot: Bot, student_name: str, grade: int, s
     try:
         await bot.send_message(ADMIN_TELEGRAM_ID, message, parse_mode="HTML")
     except Exception as e:
-        print(f"Ошибка отправки уведомления: {e}")
+        logger.error(f"Ошибка отправки уведомления: {e}")
 
 
 async def notify_admin_screenshot_received(bot: Bot, student_name: str, subject: str):
@@ -106,7 +110,7 @@ async def notify_admin_daily_summary(
     try:
         await bot.send_message(ADMIN_TELEGRAM_ID, message, parse_mode="HTML")
     except Exception as e:
-        print(f"Ошибка отправки сводки: {e}")
+        logger.error(f"Ошибка отправки сводки: {e}")
 
 
 async def notify_admin_missing_screenshots(bot: Bot, students: List[Dict]):
@@ -127,7 +131,7 @@ async def notify_admin_missing_screenshots(bot: Bot, students: List[Dict]):
     try:
         await bot.send_message(ADMIN_TELEGRAM_ID, message, parse_mode="HTML")
     except Exception as e:
-        print(f"Ошибка отправки списка: {e}")
+        logger.error(f"Ошибка отправки списка: {e}")
 
 
 async def notify_admin_student_registered(bot: Bot, student_name: str):
@@ -165,4 +169,4 @@ async def notify_admin_error(bot: Bot, error_message: str, context: str = ""):
     try:
         await bot.send_message(ADMIN_TELEGRAM_ID, message, parse_mode="HTML")
     except Exception as e:
-        print(f"Ошибка отправки уведомления об ошибке: {e}")
+        logger.error(f"Ошибка отправки уведомления об ошибке: {e}")

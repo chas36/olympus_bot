@@ -53,6 +53,9 @@ def print_warning(text):
     print(f"{Colors.YELLOW}⚠️  {text}{Colors.END}")
 
 
+# Константы для проверки плейсхолдеров переменных окружения
+PLACEHOLDER_PREFIXES = ['your_', 'STRONG_PASSWORD']
+
 def check_env_file():
     """Проверка .env файла"""
     print_header("1. Проверка .env файла")
@@ -78,7 +81,7 @@ def check_env_file():
     missing_vars = []
     for var in required_vars:
         value = os.getenv(var)
-        if not value or value.startswith('your_') or value.startswith('STRONG_PASSWORD'):
+        if not value or any(value.startswith(prefix) for prefix in PLACEHOLDER_PREFIXES):
             missing_vars.append(var)
             print_error(f"  {var} не настроен или использует значение по умолчанию")
         else:

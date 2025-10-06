@@ -53,15 +53,18 @@ async def upload_olympiad_file(
         )
     
     # Парсим файл
+    parsed_data = None
     try:
         parsed_data = parse_olympiad_file(file_path)
     except Exception as e:
-        # Удаляем файл в случае ошибки парсинга
-        os.remove(file_path)
         raise HTTPException(
             status_code=400,
             detail=f"Ошибка парсинга файла: {str(e)}"
         )
+    finally:
+        # Удаляем файл после парсинга, независимо от результата
+        if os.path.exists(file_path):
+            os.remove(file_path)
     
     # Деактивируем все предыдущие сессии
     await crud.deactivate_all_sessions(session)
