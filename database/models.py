@@ -51,7 +51,7 @@ class Grade8Code(Base):
     __tablename__ = "grade8_codes"
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=True)  # Изменили False на True
     session_id = Column(Integer, ForeignKey("olympiad_sessions.id"), nullable=False)
     code = Column(String(100), nullable=False, index=True)
     is_issued = Column(Boolean, default=False)
@@ -89,7 +89,7 @@ class CodeRequest(Base):
     __tablename__ = "code_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=True)  # Изменили False на True
     session_id = Column(Integer, ForeignKey("olympiad_sessions.id"), nullable=False)
     grade = Column(Integer, nullable=False)  # 8 или 9
     code = Column(String(100), nullable=False)  # Копия кода для истории

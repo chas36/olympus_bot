@@ -1,6 +1,7 @@
 import openpyxl
 from typing import List, Dict
 import logging
+import re  # Добавьте этот импорт!
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,16 @@ class StudentExcelParser:
             class_value = str(class_cell.value).strip() if class_cell.value else ""
             
             try:
-                # Извлекаем число из строки типа "8А", "9 Б", "11"
-                class_number = int(''.join(filter(str.isdigit, class_value)))
+                # Извлекаем ПЕРВОЕ число из строки (для 8-Т2, 7-Т1 и т.д.)
+                match = re.search(r'(\d+)', class_value)
+                if not match:
+                    logger.warning(f"Пропуск строки {row_idx}: не найдена цифра в '{class_value}'")
+                    continue
+                
+                class_number = int(match.group(1))
                 
                 if not (4 <= class_number <= 11):
-                    logger.warning(f"Пропуск строки {row_idx}: некорректный класс {class_value}")
+                    logger.warning(f"Пропуск строки {row_idx}: некорректный класс {class_value} (число {class_number})")
                     continue
                 
                 students.append({
