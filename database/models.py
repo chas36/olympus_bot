@@ -14,6 +14,8 @@ class Student(Base):
     telegram_id = Column(String(50), unique=True, nullable=True, index=True)
     registration_code = Column(String(50), unique=True, nullable=False, index=True)
     is_registered = Column(Boolean, default=False)
+    class_number = Column(Integer, nullable=True, index=True)  # Номер класса (4-11)
+    parallel = Column(String(10), nullable=True)  # Параллель (А, Б, Т1, Т2, и т.д.)
     created_at = Column(DateTime, default=datetime.utcnow)
     registered_at = Column(DateTime, nullable=True)
 
@@ -23,16 +25,17 @@ class Student(Base):
     assigned_grade9_codes = relationship("Grade9Code", back_populates="assigned_student")
 
     def __repr__(self):
-        return f"<Student(id={self.id}, name='{self.full_name}', registered={self.is_registered})>"
+        return f"<Student(id={self.id}, name='{self.full_name}', class={self.class_number}{self.parallel or ''}, registered={self.is_registered})>"
 
 
 class OlympiadSession(Base):
-    """Модель сессии олимпиады (один предмет в один день)"""
+    """Модель сессии олимпиады (один предмет со всех параллелей)"""
     __tablename__ = "olympiad_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    subject = Column(String(100), nullable=False)  # Название предмета
-    date = Column(DateTime, nullable=False, index=True)
+    subject = Column(String(100), nullable=False, index=True)  # Название предмета
+    date = Column(DateTime, nullable=False, index=True)  # Дата проведения из CSV
+    stage = Column(String(50), nullable=True)  # Этап (школьный, муниципальный, и т.д.)
     upload_time = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     uploaded_file_name = Column(String(255), nullable=True)
@@ -43,7 +46,7 @@ class OlympiadSession(Base):
     code_requests = relationship("CodeRequest", back_populates="session")
 
     def __repr__(self):
-        return f"<OlympiadSession(id={self.id}, subject='{self.subject}', date={self.date})>"
+        return f"<OlympiadSession(id={self.id}, subject='{self.subject}', date={self.date}, stage='{self.stage}')>"
 
 
 class Grade8Code(Base):

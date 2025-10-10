@@ -25,32 +25,61 @@ class StudentExcelParser:
         students = []
         sheet = self.workbook.active
         
-        # Ищем заголовки
+        # Ищем заголовки - УЛУЧШЕННАЯ ВЕРСИЯ
         header_row = None
         fio_col = None
         class_col = None
         
-        for row_idx, row in enumerate(sheet.iter_rows(max_row=10), start=1):
+        # Расширенные варианты названий колонок
+        fio_variants = ['фио', 'имя', 'ф.и.о', 'ф.и.о.', 'фамилия', 'студент', 'ученик']
+        class_variants = ['класс', 'группа', 'grade', 'class']
+        
+        for row_idx, row in enumerate(sheet.iter_rows(max_row=15), start=1):  # Увеличили до 15 строк
             for col_idx, cell in enumerate(row, start=1):
-                if cell.value:
-                    cell_text = str(cell.value).lower().strip()
+                if not cell.value:
+                    continue
                     
-                    if 'фио' in cell_text or 'имя' in cell_text:
-                        fio_col = col_idx
-                        header_row = row_idx
-                    elif 'класс' in cell_text:
-                        class_col = col_idx
-                        header_row = row_idx
+                cell_text = str(cell.value).lower().strip()
+                
+                # Проверяем варианты для ФИО
+                if not fio_col:
+                    for variant in fio_variants:
+                        if variant in cell_text:
+                            fio_col = col_idx
+                            header_row = row_idx
+                            logger.info(f"Найдена колонка ФИО: '{cell.value}' в столбце {col_idx}")
+                            break
+                
+                # Проверяем варианты для Класса
+                if not class_col:
+                    for variant in class_variants:
+                        if variant in cell_text:
+                            class_col = col_idx
+                            header_row = row_idx
+                            logger.info(f"Найдена колонка Класс: '{cell.value}' в столбце {col_idx}")
+                            break
             
             if fio_col and class_col:
                 break
         
         if not fio_col or not class_col:
-            raise ValueError("Не найдены колонки ФИО и Класс в таблице")
+            # Выводим первые 5 строк для отладки
+            logger.error("Не найдены колонки ФИО и Класс!")
+            logger.error("Первые 5 строк файла:")
+            for i, row in enumerate(sheet.iter_rows(max_row=5), 1):
+                row_data = [str(cell.value) if cell.value else '' for cell in row[:10]]
+                logger.error(f"Строка {i}: {row_data}")
+            
+            raise ValueError(
+                "Не найдены колонки ФИО и Класс в таблице. "
+                "Проверьте, что в первых 15 строках есть заголовки с названиями колонок. "
+                "Допустимые варианты: ФИО/Имя/Фамилия для имен, Класс/Группа для класса."
+            )
         
-        logger.info(f"Найдены колонки: ФИО - {fio_col}, Класс - {class_col}")
+        logger.info(f"Найдены колонки: ФИО - столбец {fio_col}, Класс - столбец {class_col}")
         logger.info(f"Строка заголовка: {header_row}")
         
+        # Остальной код без изменений...
         # Читаем данные
         for row_idx, row in enumerate(sheet.iter_rows(min_row=header_row + 1), start=header_row + 1):
             fio_cell = row[fio_col - 1]
@@ -77,9 +106,15 @@ class StudentExcelParser:
                     logger.warning(f"Пропуск строки {row_idx}: некорректный класс {class_value} (число {class_number})")
                     continue
                 
+                # Извлекаем параллель (все после первой цифры)
+                parallel = class_value[match.end():].strip() if match.end() < len(class_value) else None
+                if parallel and parallel.startswith('-'):
+                    parallel = parallel[1:].strip()
+
                 students.append({
                     "full_name": full_name,
                     "class_number": class_number,
+                    "parallel": parallel if parallel else None,
                     "row_number": row_idx
                 })
                 

@@ -1,173 +1,220 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_
 from database.database import get_async_session
-from database import crud
-from typing import List, Dict
+from database.models import (
+    Student, OlympiadSession, Grade8Code, Grade9Code, 
+    CodeRequest, Reminder
+)
 
-router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
+router = APIRouter(prefix="/api/monitoring", tags=["Monitoring"])
 
 
-@router.get("/statistics")
-async def get_statistics(
+@router.get("/dashboard")
+async def get_dashboard_stats(
     session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """
-    Получить общую статистику
-    """
-    # Получаем активную сессию
-    active_session = await crud.get_active_session(session)
+):
+    """Статистика для дашборда"""
     
-    if not active_session:
-        return {
-            "active_session": None,
-            "message": "Нет активной сессии"
-        }
+    # Ученики
+    result = await session.execute(select(func.count(Student.id)))
+    total_students = result.scalar()
     
-    # Получаем все запросы для сессии
-    all_requests = await crud.get_all_requests_for_session(session, active_session.id)
+    result = await session.execute(
+        select(func.count(Student.id)).where(Student.is_registered == True)
+    )
+    registered_students = result.scalar()
     
-    # Подсчитываем статистику
-    total_students = len(await crud.get_all_students(session))
-    registered_students = len([s for s in await crud.get_all_students(session) if s.is_registered])
+    # Активная сессия
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.is_active == True)
+    )
+    active_session = result.scalar_one_or_none()
     
-    requested_code_count = len(all_requests)
-    grade8_requests = len([r for r in all_requests if r.grade == 8])
-    grade9_requests = len([r for r in all_requests if r.grade == 9])
-    
-    screenshots_submitted = len([r for r in all_requests if r.screenshot_submitted])
-    screenshots_missing = requested_code_count - screenshots_submitted
-    
-    # Доступные коды 9 класса
-    available_grade9 = await crud.count_available_grade9_codes(session, active_session.id)
-    
-    return {
-        "active_session": {
+    active_session_data = None
+    if active_session:
+        # Статистика по активной сессии
+        result = await session.execute(
+            select(func.count(Grade8Code.id)).where(
+                Grade8Code.session_id == active_session.id
+            )
+        )
+        total_codes = result.scalar()
+        
+        result = await session.execute(
+            select(func.count(Grade8Code.id)).where(
+                and_(
+                    Grade8Code.session_id == active_session.id,
+                    Grade8Code.is_issued == True
+                )
+            )
+        )
+        issued_codes = result.scalar()
+        
+        result = await session.execute(
+            select(func.count(CodeRequest.id)).where(
+                and_(
+                    CodeRequest.session_id == active_session.id,
+                    CodeRequest.screenshot_submitted == True
+                )
+            )
+        )
+        screenshots = result.scalar()
+        
+        active_session_data = {
             "id": active_session.id,
             "subject": active_session.subject,
             "date": active_session.date.isoformat(),
-            "uploaded_file_name": active_session.uploaded_file_name
-        },
+            "total_codes": total_codes,
+            "issued_codes": issued_codes,
+            "screenshots": screenshots
+        }
+    
+    # Всего сессий
+    result = await session.execute(select(func.count(OlympiadSession.id)))
+    total_sessions = result.scalar()
+    
+    return {
         "students": {
             "total": total_students,
             "registered": registered_students,
-            "unregistered": total_students - registered_students
+            "not_registered": total_students - registered_students
         },
-        "codes": {
-            "total_requested": requested_code_count,
-            "grade8_requested": grade8_requests,
-            "grade9_requested": grade9_requests,
-            "grade9_available": available_grade9
-        },
-        "screenshots": {
-            "submitted": screenshots_submitted,
-            "missing": screenshots_missing,
-            "percentage": round((screenshots_submitted / requested_code_count * 100) if requested_code_count > 0 else 0, 1)
-        }
+        "active_session": active_session_data,
+        "total_sessions": total_sessions
     }
 
 
-@router.get("/students-status")
-async def get_students_status(
-    session: AsyncSession = Depends(get_async_session)
-) -> List[Dict]:
-    """
-    Получить детальный статус всех учеников для активной сессии
-    """
-    # Получаем активную сессию
-    active_session = await crud.get_active_session(session)
-    
-    if not active_session:
-        raise HTTPException(status_code=404, detail="Нет активной сессии")
-    
-    # Получаем всех учеников
-    all_students = await crud.get_all_students(session)
-    
-    # Получаем все запросы для сессии
-    all_requests = await crud.get_all_requests_for_session(session, active_session.id)
-    
-    # Создаем словарь запросов по student_id
-    requests_dict = {r.student_id: r for r in all_requests}
-    
-    result = []
-    
-    for student in all_students:
-        request = requests_dict.get(student.id)
-        
-        student_info = {
-            "id": student.id,
-            "full_name": student.full_name,
-            "is_registered": student.is_registered,
-            "telegram_id": student.telegram_id,
-            "code_requested": request is not None,
-            "grade": request.grade if request else None,
-            "code": request.code if request else None,
-            "requested_at": request.requested_at.isoformat() if request else None,
-            "screenshot_submitted": request.screenshot_submitted if request else False,
-            "screenshot_path": request.screenshot_path if request else None,
-            "screenshot_submitted_at": request.screenshot_submitted_at.isoformat() if (request and request.screenshot_submitted_at) else None
-        }
-        
-        result.append(student_info)
-    
-    # Сортируем: сначала те, кто запросил коды
-    result.sort(key=lambda x: (not x["code_requested"], x["full_name"]))
-    
-    return result
-
-
-@router.get("/missing-screenshots")
-async def get_missing_screenshots(
-    session: AsyncSession = Depends(get_async_session)
-) -> List[Dict]:
-    """
-    Получить список учеников, которые не прислали скриншоты
-    """
-    # Получаем активную сессию
-    active_session = await crud.get_active_session(session)
-    
-    if not active_session:
-        raise HTTPException(status_code=404, detail="Нет активной сессии")
-    
-    # Получаем запросы без скриншотов
-    requests = await crud.get_requests_without_screenshot(session, active_session.id)
-    
-    return [
-        {
-            "student_id": r.student_id,
-            "full_name": r.student.full_name,
-            "telegram_id": r.student.telegram_id,
-            "grade": r.grade,
-            "code": r.code,
-            "requested_at": r.requested_at.isoformat()
-        }
-        for r in requests
-    ]
-
-
-@router.get("/screenshot/{request_id}")
-async def get_screenshot_info(
-    request_id: int,
+@router.get("/sessions/{session_id}/details")
+async def get_session_details(
+    session_id: int,
     session: AsyncSession = Depends(get_async_session)
 ):
-    """
-    Получить информацию о скриншоте для конкретного запроса
-    """
-    from sqlalchemy import select
-    from database.models import CodeRequest
+    """Детальная информация о сессии"""
     
+    # Получаем сессию
     result = await session.execute(
-        select(CodeRequest).where(CodeRequest.id == request_id)
+        select(OlympiadSession).where(OlympiadSession.id == session_id)
     )
-    request = result.scalar_one_or_none()
+    olympiad = result.scalar_one_or_none()
     
-    if not request:
-        raise HTTPException(status_code=404, detail="Запрос не найден")
+    if not olympiad:
+        return {"error": "Сессия не найдена"}
     
-    if not request.screenshot_submitted:
-        raise HTTPException(status_code=404, detail="Скриншот не был прислан")
+    # Коды 8 класса
+    result = await session.execute(
+        select(Grade8Code).where(Grade8Code.session_id == session_id)
+    )
+    codes8 = result.scalars().all()
+    
+    assigned = len([c for c in codes8 if c.student_id])
+    issued = len([c for c in codes8 if c.is_issued])
+    
+    # Запросы
+    result = await session.execute(
+        select(CodeRequest).where(CodeRequest.session_id == session_id)
+    )
+    requests = result.scalars().all()
+    
+    with_screenshot = len([r for r in requests if r.screenshot_submitted])
     
     return {
-        "student_name": request.student.full_name,
-        "screenshot_path": request.screenshot_path,
-        "submitted_at": request.screenshot_submitted_at.isoformat()
+        "session": {
+            "id": olympiad.id,
+            "subject": olympiad.subject,
+            "date": olympiad.date.isoformat(),
+            "is_active": olympiad.is_active
+        },
+        "codes": {
+            "total": len(codes8),
+            "assigned": assigned,
+            "unassigned": len(codes8) - assigned,
+            "issued": issued
+        },
+        "requests": {
+            "total": len(requests),
+            "with_screenshot": with_screenshot,
+            "without_screenshot": len(requests) - with_screenshot
+        }
     }
+
+
+@router.get("/students/without-codes")
+async def get_students_without_codes(
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Ученики без назначенных кодов"""
+    
+    # Получаем активную сессию
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.is_active == True)
+    )
+    active_session = result.scalar_one_or_none()
+    
+    if not active_session:
+        return {"message": "Нет активной сессии", "students": []}
+    
+    # Все зарегистрированные ученики
+    result = await session.execute(
+        select(Student).where(Student.is_registered == True)
+    )
+    all_students = result.scalars().all()
+    
+    # Ученики с кодами
+    result = await session.execute(
+        select(Grade8Code.student_id).where(
+            and_(
+                Grade8Code.session_id == active_session.id,
+                Grade8Code.student_id != None
+            )
+        )
+    )
+    students_with_codes = {row[0] for row in result.fetchall()}
+    
+    # Без кодов
+    students_without = [
+        {
+            "id": s.id,
+            "full_name": s.full_name,
+            "telegram_id": s.telegram_id
+        }
+        for s in all_students
+        if s.id not in students_with_codes
+    ]
+    
+    return {
+        "session": active_session.subject,
+        "count": len(students_without),
+        "students": students_without
+    }
+
+
+@router.get("/recent-activity")
+async def get_recent_activity(
+    limit: int = 20,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Последняя активность"""
+    
+    # Последние запросы кодов
+    result = await session.execute(
+        select(CodeRequest)
+        .order_by(CodeRequest.requested_at.desc())
+        .limit(limit)
+    )
+    requests = result.scalars().all()
+    
+    activity = []
+    for req in requests:
+        student = await session.get(Student, req.student_id)
+        olympiad = await session.get(OlympiadSession, req.session_id)
+        
+        activity.append({
+            "type": "code_request",
+            "student": student.full_name if student else "Неизвестен",
+            "subject": olympiad.subject if olympiad else "Неизвестен",
+            "timestamp": req.requested_at.isoformat(),
+            "screenshot": req.screenshot_submitted
+        })
+    
+    return {"activity": activity}

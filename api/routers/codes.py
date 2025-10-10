@@ -1,275 +1,245 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.database import get_async_session
+from sqlalchemy import select, func, and_
 from typing import List, Dict
-from pydantic import BaseModel
-import os
 import tempfile
+import os
 import io
+import csv
 
-from database.models import OlympiadSession, DistributionMode
+from database.database import get_async_session
+from database.models import OlympiadSession, Grade8Code, Grade9Code, Student
 from parser.csv_parser import parse_codes_csv
-from utils.code_distribution import CodeDistributor
-from utils.export import CodeExporter
 from datetime import datetime
 
-router = APIRouter(prefix="/admin/codes", tags=["Codes Management"])
-
-
-class SessionCreate(BaseModel):
-    """Модель для создания сессии"""
-    subject: str
-    date: datetime = None
-    distribution_mode: str = "on_demand"  # pre_distributed или on_demand
+router = APIRouter(prefix="/api/codes", tags=["Codes"])
 
 
 @router.post("/upload-csv")
 async def upload_codes_csv(
     files: List[UploadFile] = File(...),
-    subject: str = None,
-    distribution_mode: str = "on_demand",
+    auto_reserve: bool = Query(True, description="Автоматически резервировать коды 9 класса для 8"),
     session: AsyncSession = Depends(get_async_session)
-) -> Dict:
+):
     """
-    Загрузка CSV файлов с кодами
-    
-    Процесс:
-    1. Парсит все CSV файлы
-    2. Создает сессию олимпиады
-    3. Создает коды для каждого класса
-    4. Создает резерв из кодов 9 класса
-    5. Опционально распределяет коды сразу (pre-distributed режим)
+    Загрузка кодов из CSV с группировкой по предметам.
+
+    Все коды одного предмета из разных параллелей объединяются в одну сессию.
+    Дата берется из CSV файла.
     """
     results = []
-    parsed_data = []
-    
-    # Парсим все файлы
+    # Словарь для группировки: {subject: {date: datetime, codes_by_class: {8: [...], 9: [...]}}}
+    subjects_map = {}
+
     for file in files:
         if not file.filename.endswith('.csv'):
             continue
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp_file:
+
+        # Сохраняем временно
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
             content = await file.read()
-            tmp_file.write(content)
-            tmp_path = tmp_file.name
-        
+            tmp.write(content)
+            tmp_path = tmp.name
+
         try:
-            data = parse_codes_csv(tmp_path)
-            parsed_data.append({
-                "filename": file.filename,
-                "data": data
-            })
+            # Парсим
+            parsed = parse_codes_csv(tmp_path, encoding='windows-1251')
+
+            for subject_data in parsed:
+                subject = subject_data['subject']
+                class_num = subject_data['class_number']
+                codes = subject_data['codes']
+                date = subject_data.get('date') or datetime.now()
+
+                # Группируем по предметам
+                if subject not in subjects_map:
+                    subjects_map[subject] = {
+                        'date': date,
+                        'codes_by_class': {}
+                    }
+
+                # Добавляем коды для этого класса
+                if class_num not in subjects_map[subject]['codes_by_class']:
+                    subjects_map[subject]['codes_by_class'][class_num] = []
+
+                subjects_map[subject]['codes_by_class'][class_num].extend(codes)
+
+                results.append({
+                    "file": file.filename,
+                    "subject": subject,
+                    "class": class_num,
+                    "codes_count": len(codes)
+                })
+
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-    
-    if not parsed_data:
-        raise HTTPException(
-            status_code=400,
-            detail="Не удалось распарсить ни один файл"
-        )
-    
-    # Определяем предмет и дату
-    first_data = parsed_data[0]["data"]
-    session_subject = subject or first_data["subject"]
-    session_date = first_data["date"] or datetime.now()
-    
-    # Деактивируем предыдущие сессии этого предмета
-    from sqlalchemy import update
-    await session.execute(
-        update(OlympiadSession)
-        .where(OlympiadSession.subject == session_subject)
-        .values(is_active=False)
-    )
-    
-    # Создаем новую сессию
-    mode = DistributionMode.PRE_DISTRIBUTED if distribution_mode == "pre_distributed" else DistributionMode.ON_DEMAND
-    
-    olympiad = OlympiadSession(
-        subject=session_subject,
-        date=session_date,
-        distribution_mode=mode,
-        uploaded_file_name=", ".join([p["filename"] for p in parsed_data])
-    )
-    session.add(olympiad)
-    await session.flush()
-    
-    # Создаем коды
-    codes_created = {}
-    
-    for parsed in parsed_data:
-        data = parsed["data"]
-        class_num = data["class_number"]
-        codes = data["codes"]
-        
-        if class_num and codes:
-            created = await CodeDistributor.create_codes_from_csv(
-                session,
-                session_id=olympiad.id,
-                class_number=class_num,
-                codes=codes
+
+    # Создаем сессии для каждого предмета
+    created_sessions = []
+    for subject, data in subjects_map.items():
+        # Проверяем, существует ли уже сессия для этого предмета
+        result = await session.execute(
+            select(OlympiadSession).where(
+                OlympiadSession.subject == subject
             )
-            
-            codes_created[class_num] = len(created)
-            results.append({
-                "filename": parsed["filename"],
-                "class": class_num,
-                "codes_count": len(created)
-            })
+        )
+        existing_session = result.scalar_one_or_none()
+
+        if existing_session:
+            # Обновляем существующую сессию
+            olympiad = existing_session
+            olympiad.date = data['date']
+        else:
+            # Создаем новую сессию
+            olympiad = OlympiadSession(
+                subject=subject,
+                date=data['date'],
+                is_active=False
+            )
+            session.add(olympiad)
+
+        await session.flush()
+
+        # Добавляем коды всех классов
+        for class_num, codes in data['codes_by_class'].items():
+            if class_num == 8:
+                for code_str in codes:
+                    code = Grade8Code(
+                        student_id=None,
+                        session_id=olympiad.id,
+                        code=code_str,
+                        is_issued=False
+                    )
+                    session.add(code)
+
+            elif class_num == 9:
+                for code_str in codes:
+                    code = Grade9Code(
+                        session_id=olympiad.id,
+                        code=code_str,
+                        is_used=False
+                    )
+                    session.add(code)
+
+        created_sessions.append({
+            "subject": subject,
+            "date": data['date'].isoformat() if isinstance(data['date'], datetime) else str(data['date']),
+            "classes": list(data['codes_by_class'].keys())
+        })
+
+    await session.commit()
+
+    # Автоматическое резервирование
+    if auto_reserve:
+        reserve_result = await reserve_grade9_for_grade8(session)
+        return {
+            "success": True,
+            "uploaded": results,
+            "sessions_created": created_sessions,
+            "reservation": reserve_result
+        }
+
+    return {
+        "success": True,
+        "uploaded": results,
+        "sessions_created": created_sessions
+    }
+
+
+async def reserve_grade9_for_grade8(session: AsyncSession) -> Dict:
+    """
+    Автоматическое резервирование кодов 9 класса для 8 классов
+    
+    Логика:
+    1. Получаем количество учеников 8 класса
+    2. Получаем количество свободных кодов 8 класса
+    3. Если кодов не хватает - берем из 9 класса
+    """
+    # Получаем активную сессию
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.is_active == True)
+    )
+    active_session = result.scalar_one_or_none()
+    
+    if not active_session:
+        return {"message": "Нет активной сессии", "reserved": 0}
+    
+    # Количество учеников 8 класса
+    result = await session.execute(
+        select(func.count(Student.id)).where(Student.is_registered == True)
+    )
+    students_count = result.scalar()
+    
+    # Количество свободных кодов 8 класса
+    result = await session.execute(
+        select(func.count(Grade8Code.id)).where(
+            and_(
+                Grade8Code.session_id == active_session.id,
+                Grade8Code.student_id == None
+            )
+        )
+    )
+    available_grade8 = result.scalar()
+    
+    # Нужно зарезервировать
+    needed = max(0, students_count - available_grade8)
+    
+    if needed == 0:
+        return {"message": "Резервирование не требуется", "reserved": 0}
+    
+    # Получаем свободные коды 9 класса
+    result = await session.execute(
+        select(Grade9Code).where(
+            and_(
+                Grade9Code.session_id == active_session.id,
+                Grade9Code.is_used == False
+            )
+        ).limit(needed)
+    )
+    grade9_codes = result.scalars().all()
+    
+    # Конвертируем коды 9 класса в коды 8 класса
+    reserved_count = 0
+    for grade9_code in grade9_codes:
+        # Создаем новый код для 8 класса
+        new_grade8_code = Grade8Code(
+            student_id=None,
+            session_id=active_session.id,
+            code=grade9_code.code,  # Используем тот же код
+            is_issued=False
+        )
+        session.add(new_grade8_code)
+        
+        # Помечаем код 9 класса как использованный
+        grade9_code.is_used = True
+        
+        reserved_count += 1
     
     await session.commit()
     
-    # Создаем резерв из 9 класса
-    reserve_distribution = {}
-    if 9 in codes_created:
-        reserve_distribution = await CodeDistributor.create_reserve_from_grade9(
-            session, olympiad.id
-        )
-    
-    # Предварительное распределение если нужно
-    distribution_results = None
-    if mode == DistributionMode.PRE_DISTRIBUTED:
-        distribution_results = await CodeDistributor.distribute_codes_pre_assign(
-            session, olympiad.id
-        )
-    
     return {
-        "success": True,
-        "session_id": olympiad.id,
-        "subject": session_subject,
-        "distribution_mode": mode.value,
-        "files_processed": results,
-        "reserve_distribution": reserve_distribution,
-        "pre_distribution": distribution_results
+        "message": f"Зарезервировано {reserved_count} кодов из 9 класса для 8 класса",
+        "reserved": reserved_count,
+        "needed": needed
     }
 
 
-@router.post("/distribute/{session_id}")
-async def distribute_codes(
-    session_id: int,
-    session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """
-    Распределение кодов между учениками (для pre-distributed режима)
-    
-    Использовать, если изначально коды были загружены в on-demand режиме,
-    но теперь нужно распределить их заранее
-    """
-    results = await CodeDistributor.distribute_codes_pre_assign(
-        session, session_id
-    )
-    
-    return {
-        "success": True,
-        "assigned": len(results["assigned"]),
-        "failed": len(results["failed"]),
-        "details": results
-    }
-
-
-@router.get("/available/{session_id}")
-async def get_available_codes(
-    session_id: int,
-    class_number: int = None,
-    session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """Получить количество доступных кодов"""
-    counts = await CodeDistributor.get_available_codes_count(
-        session, session_id, class_number
-    )
-    
-    return {
-        "session_id": session_id,
-        "available_codes": counts
-    }
-
-
-@router.post("/reassign/{code_id}")
-async def reassign_code(
-    code_id: int,
-    new_student_id: int,
-    session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """Переназначить код другому ученику"""
-    code = await CodeDistributor.reassign_code(
-        session, code_id, new_student_id
-    )
-    
-    return {
-        "success": True,
-        "code_id": code.id,
-        "new_student_id": new_student_id,
-        "code": code.code
-    }
-
-
-@router.get("/export/class/{session_id}/{class_number}")
-async def export_class_codes(
-    session_id: int,
-    class_number: int,
-    include_unassigned: bool = False,
+@router.post("/reserve")
+async def manual_reserve(
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Экспорт кодов конкретного класса в CSV"""
-    csv_data = await CodeExporter.export_class_codes_csv(
-        session, session_id, class_number, include_unassigned
-    )
-    
-    # Получаем информацию о сессии для имени файла
-    from sqlalchemy import select
-    result = await session.execute(
-        select(OlympiadSession).where(OlympiadSession.id == session_id)
-    )
-    olympiad = result.scalar_one_or_none()
-    
-    filename = f"{olympiad.subject}_{class_number}_класс.csv"
-    
-    return StreamingResponse(
-        io.StringIO(csv_data),
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}"
-        }
-    )
-
-
-@router.get("/export/all/{session_id}")
-async def export_all_classes_archive(
-    session_id: int,
-    include_unassigned: bool = False,
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Экспорт всех классов в ZIP архив"""
-    zip_data = await CodeExporter.export_all_classes_zip(
-        session, session_id, include_unassigned
-    )
-    
-    # Получаем информацию о сессии для имени файла
-    from sqlalchemy import select
-    result = await session.execute(
-        select(OlympiadSession).where(OlympiadSession.id == session_id)
-    )
-    olympiad = result.scalar_one_or_none()
-    
-    filename = f"{olympiad.subject}_все_классы.zip"
-    
-    return StreamingResponse(
-        io.BytesIO(zip_data),
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}"
-        }
-    )
+    """Ручное резервирование кодов 9→8"""
+    result = await reserve_grade9_for_grade8(session)
+    return result
 
 
 @router.get("/sessions")
-async def get_all_sessions(
+async def get_sessions(
     session: AsyncSession = Depends(get_async_session)
-) -> List[Dict]:
-    """Получить список всех сессий"""
-    from sqlalchemy import select
-    
+):
+    """Получить все сессии"""
     result = await session.execute(
         select(OlympiadSession).order_by(OlympiadSession.date.desc())
     )
@@ -280,7 +250,6 @@ async def get_all_sessions(
             "id": s.id,
             "subject": s.subject,
             "date": s.date.isoformat(),
-            "distribution_mode": s.distribution_mode.value,
             "is_active": s.is_active
         }
         for s in sessions
@@ -291,22 +260,138 @@ async def get_all_sessions(
 async def activate_session(
     session_id: int,
     session: AsyncSession = Depends(get_async_session)
-) -> Dict:
+):
     """Активировать сессию"""
-    from sqlalchemy import update, select
-    
     # Деактивируем все
-    await session.execute(
-        update(OlympiadSession).values(is_active=False)
-    )
+    result = await session.execute(select(OlympiadSession))
+    for s in result.scalars().all():
+        s.is_active = False
     
     # Активируем нужную
-    await session.execute(
-        update(OlympiadSession)
-        .where(OlympiadSession.id == session_id)
-        .values(is_active=True)
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.id == session_id)
     )
+    target = result.scalar_one_or_none()
     
+    if not target:
+        raise HTTPException(404, "Сессия не найдена")
+    
+    target.is_active = True
     await session.commit()
     
     return {"success": True, "session_id": session_id}
+
+
+@router.get("/stats")
+async def get_codes_stats(
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Статистика по кодам"""
+    # Коды 8 класса
+    result = await session.execute(select(func.count(Grade8Code.id)))
+    total_grade8 = result.scalar()
+    
+    result = await session.execute(
+        select(func.count(Grade8Code.id)).where(Grade8Code.student_id != None)
+    )
+    assigned_grade8 = result.scalar()
+    
+    result = await session.execute(
+        select(func.count(Grade8Code.id)).where(Grade8Code.is_issued == True)
+    )
+    issued_grade8 = result.scalar()
+    
+    # Коды 9 класса
+    result = await session.execute(select(func.count(Grade9Code.id)))
+    total_grade9 = result.scalar()
+    
+    result = await session.execute(
+        select(func.count(Grade9Code.id)).where(Grade9Code.is_used == True)
+    )
+    used_grade9 = result.scalar()
+    
+    return {
+        "grade8": {
+            "total": total_grade8,
+            "assigned": assigned_grade8,
+            "unassigned": total_grade8 - assigned_grade8,
+            "issued": issued_grade8
+        },
+        "grade9": {
+            "total": total_grade9,
+            "used": used_grade9,
+            "available": total_grade9 - used_grade9
+        }
+    }
+
+
+@router.get("/export/session/{session_id}")
+async def export_session_codes(
+    session_id: int,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Экспорт кодов сессии в CSV"""
+    from urllib.parse import quote
+    
+    # Получаем сессию
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.id == session_id)
+    )
+    olympiad = result.scalar_one_or_none()
+    
+    if not olympiad:
+        raise HTTPException(404, "Сессия не найдена")
+    
+    # Получаем коды 8 класса
+    result = await session.execute(
+        select(Grade8Code).where(Grade8Code.session_id == session_id)
+    )
+    codes8 = result.scalars().all()
+    
+    # Создаем CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    writer.writerow([f"Коды - {olympiad.subject} - 8 класс"])
+    writer.writerow([f"Дата: {olympiad.date.strftime('%d.%m.%Y')}"])
+    writer.writerow([])
+    writer.writerow(["№", "ФИО", "Код", "Выдан"])
+    
+    for i, code in enumerate(codes8, 1):
+        student_name = "-"
+        if code.student:
+            student_name = code.student.full_name
+        
+        writer.writerow([
+            i,
+            student_name,
+            code.code,
+            "Да" if code.is_issued else "Нет"
+        ])
+    
+    output.seek(0)
+    
+    # Используем транслитерацию для имени файла
+    # Простая замена русских букв на латинские
+    transliteration = {
+        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+        'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+        'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+        'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+        'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+        ' ': '_', '-': '_'
+    }
+    
+    safe_subject = olympiad.subject.lower()
+    for ru, en in transliteration.items():
+        safe_subject = safe_subject.replace(ru, en)
+    
+    filename = f"{safe_subject}_8klass.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )

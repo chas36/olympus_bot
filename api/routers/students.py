@@ -1,125 +1,104 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.database import get_async_session
+from sqlalchemy import select
 from typing import List, Dict
-from pydantic import BaseModel
-import os
 import tempfile
+import os
 
+from database.database import get_async_session
+from database.models import Student
 from parser.excel_parser import parse_students_excel
-from utils.student_management import StudentManager
+from utils.auth import generate_multiple_codes
 
-router = APIRouter(prefix="/admin/students", tags=["Students Management"])
-
-
-class StudentCreate(BaseModel):
-    """Модель для создания ученика"""
-    full_name: str
-    class_number: int
+router = APIRouter(prefix="/api/students", tags=["Students"])
 
 
-class StudentUpdate(BaseModel):
-    """Модель для обновления ученика"""
-    full_name: str = None
-    class_number: int = None
-
-
-class ClassChange(BaseModel):
-    """Модель для перевода в другой класс"""
-    new_class: int
+@router.get("/", response_model=List[Dict])
+async def get_all_students(
+    include_inactive: bool = False,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Получить всех учеников"""
+    query = select(Student)
+    if not include_inactive:
+        query = query.where(Student.is_registered == True)
+    
+    result = await session.execute(query)
+    students = result.scalars().all()
+    
+    return [
+        {
+            "id": s.id,
+            "full_name": s.full_name,
+            "registration_code": s.registration_code,
+            "is_registered": s.is_registered,
+            "telegram_id": s.telegram_id,
+            "class_number": s.class_number,
+            "parallel": s.parallel,
+            "class_display": f"{s.class_number}{s.parallel or ''}" if s.class_number else None
+        }
+        for s in students
+    ]
 
 
 @router.post("/upload-excel")
 async def upload_students_excel(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """
-    Массовая загрузка учеников из Excel файла
-    """
+):
+    """Загрузка учеников из Excel"""
     if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(
-            status_code=400,
-            detail="Неверный формат файла. Поддерживаются только .xlsx и .xls"
-        )
+        raise HTTPException(400, "Поддерживаются только .xlsx и .xls файлы")
     
     # Сохраняем временный файл
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
         content = await file.read()
-        tmp_file.write(content)
-        tmp_path = tmp_file.name
+        tmp.write(content)
+        tmp_path = tmp.name
     
     try:
-        # Парсим Excel
+        # Парсим
         students_data, validation = parse_students_excel(tmp_path)
         
-        # Создаем учеников
-        created_students = await StudentManager.bulk_create_students(
-            session, students_data
-        )
+        # Генерируем коды
+        reg_codes = generate_multiple_codes(len(students_data))
+        
+        created = []
+        skipped = []
+        
+        for student_data, reg_code in zip(students_data, reg_codes):
+            # Проверяем существование
+            result = await session.execute(
+                select(Student).where(Student.full_name == student_data["full_name"])
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                skipped.append(student_data["full_name"])
+                continue
+
+            # Создаем
+            student = Student(
+                full_name=student_data["full_name"],
+                registration_code=reg_code,
+                is_registered=False,
+                class_number=student_data.get("class_number"),
+                parallel=student_data.get("parallel")
+            )
+            session.add(student)
+            created.append({
+                "name": student_data["full_name"],
+                "code": reg_code,
+                "class": f"{student_data.get('class_number')}{student_data.get('parallel') or ''}"
+            })
+        
+        await session.commit()
         
         return {
             "success": True,
-            "count": len(created_students),
-            "students": [
-                {
-                    "id": s.id,
-                    "full_name": s.full_name,
-                    "class_number": s.class_number,
-                    "registration_code": s.registration_code
-                }
-                for s in created_students
-            ],
-            "validation": {
-                "duplicates": validation["duplicates"],
-                "invalid_names": validation["invalid_names"],
-                "class_distribution": validation["class_distribution"]
-            }
-        }
-    
-    finally:
-        # Удаляем временный файл
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-
-@router.post("/update-from-excel")
-async def update_students_from_excel(
-    file: UploadFile = File(...),
-    session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """
-    Обновление списка учеников из Excel с автоматической сверкой
-    
-    Процесс:
-    - Сравнивает новый список с существующим
-    - Добавляет новых учеников
-    - Обновляет изменившихся
-    - Деактивирует отсутствующих
-    """
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(
-            status_code=400,
-            detail="Неверный формат файла"
-        )
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-        content = await file.read()
-        tmp_file.write(content)
-        tmp_path = tmp_file.name
-    
-    try:
-        students_data, validation = parse_students_excel(tmp_path)
-        
-        # Сверка и обновление
-        results = await StudentManager.compare_and_update(session, students_data)
-        
-        return {
-            "success": True,
-            "added": results["added"],
-            "updated": results["updated"],
-            "deactivated": results["deactivated"],
-            "unchanged_count": len(results["unchanged"]),
+            "created": len(created),
+            "skipped": len(skipped),
+            "students": created,
             "validation": validation
         }
     
@@ -128,129 +107,157 @@ async def update_students_from_excel(
             os.remove(tmp_path)
 
 
-@router.post("/")
-async def create_student(
-    student_data: StudentCreate,
-    session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """Создание одного ученика"""
-    student = await StudentManager.create_student(
-        session,
-        full_name=student_data.full_name,
-        class_number=student_data.class_number
-    )
-    
-    return {
-        "id": student.id,
-        "full_name": student.full_name,
-        "class_number": student.class_number,
-        "registration_code": student.registration_code
-    }
-
-
-@router.put("/{student_id}")
-async def update_student(
-    student_id: int,
-    student_data: StudentUpdate,
-    session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """Обновление данных ученика"""
-    student = await StudentManager.update_student(
-        session,
-        student_id=student_id,
-        full_name=student_data.full_name,
-        class_number=student_data.class_number
-    )
-    
-    return {
-        "id": student.id,
-        "full_name": student.full_name,
-        "class_number": student.class_number
-    }
-
-
-@router.put("/{student_id}/change-class")
-async def change_student_class(
-    student_id: int,
-    class_data: ClassChange,
-    session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """Перевод ученика в другой класс"""
-    student = await StudentManager.change_class(
-        session,
-        student_id=student_id,
-        new_class=class_data.new_class
-    )
-    
-    return {
-        "id": student.id,
-        "full_name": student.full_name,
-        "old_class": None,  # Можно получить из истории
-        "new_class": student.class_number,
-        "message": "Ученик успешно переведен"
-    }
-
-
 @router.delete("/{student_id}")
-async def deactivate_student(
+async def delete_student(
     student_id: int,
     session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """Деактивация (архивирование) ученика"""
-    student = await StudentManager.deactivate_student(session, student_id)
+):
+    """Удалить ученика"""
+    result = await session.execute(
+        select(Student).where(Student.id == student_id)
+    )
+    student = result.scalar_one_or_none()
     
+    if not student:
+        raise HTTPException(404, "Ученик не найден")
+    
+    await session.delete(student)
+    await session.commit()
+    
+    return {"success": True, "message": "Ученик удален"}
+
+
+@router.get("/stats")
+async def get_students_stats(
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Статистика по ученикам"""
+    from sqlalchemy import func
+
+    # Всего
+    result = await session.execute(select(func.count(Student.id)))
+    total = result.scalar()
+
+    # Зарегистрированных
+    result = await session.execute(
+        select(func.count(Student.id)).where(Student.is_registered == True)
+    )
+    registered = result.scalar()
+
+    # Статистика по классам
+    result = await session.execute(
+        select(Student.class_number, func.count(Student.id))
+        .where(Student.class_number.isnot(None))
+        .group_by(Student.class_number)
+        .order_by(Student.class_number)
+    )
+    by_class = {row[0]: row[1] for row in result.fetchall()}
+
     return {
-        "id": student.id,
-        "full_name": student.full_name,
-        "is_active": student.is_active,
-        "message": "Ученик деактивирован"
+        "total": total,
+        "registered": registered,
+        "not_registered": total - registered,
+        "by_class": by_class
     }
 
 
-@router.get("/by-class/{class_number}")
-async def get_students_by_class(
-    class_number: int,
-    include_inactive: bool = False,
+@router.get("/export/registration-codes")
+async def export_registration_codes(
+    class_number: int = Query(None, description="Фильтр по классу"),
+    parallel: str = Query(None, description="Фильтр по параллели"),
     session: AsyncSession = Depends(get_async_session)
-) -> List[Dict]:
-    """Получение учеников конкретного класса"""
-    students = await StudentManager.get_class_students(
-        session, class_number, include_inactive
-    )
-    
-    return [
-        {
-            "id": s.id,
-            "full_name": s.full_name,
-            "class_number": s.class_number,
-            "is_registered": s.is_registered,
-            "is_active": s.is_active
+):
+    """
+    Экспорт регистрационных кодов учеников в CSV.
+
+    Коды группируются по классам и параллелям.
+    """
+    from fastapi.responses import StreamingResponse
+    import csv
+    import io
+
+    # Строим запрос с фильтрами
+    query = select(Student).order_by(Student.class_number, Student.parallel, Student.full_name)
+
+    if class_number:
+        query = query.where(Student.class_number == class_number)
+
+    if parallel:
+        query = query.where(Student.parallel == parallel)
+
+    result = await session.execute(query)
+    students = result.scalars().all()
+
+    if not students:
+        raise HTTPException(404, "Ученики не найдены")
+
+    # Создаем CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(["Регистрационные коды для бота Olympus"])
+    writer.writerow([])
+    writer.writerow(["№", "ФИО", "Класс", "Код регистрации", "Статус"])
+
+    for i, student in enumerate(students, 1):
+        class_display = f"{student.class_number}{student.parallel or ''}" if student.class_number else "-"
+        status = "Зарегистрирован" if student.is_registered else "Ожидает"
+
+        writer.writerow([
+            i,
+            student.full_name,
+            class_display,
+            student.registration_code,
+            status
+        ])
+
+    output.seek(0)
+
+    # Формируем имя файла
+    from urllib.parse import quote
+
+    filename_parts = ["registration_codes"]
+    if class_number:
+        filename_parts.append(f"class{class_number}")
+    if parallel:
+        filename_parts.append(f"parallel{parallel}")
+    filename = "_".join(filename_parts) + ".csv"
+
+    # Кодируем имя файла для поддержки русских букв
+    filename_encoded = quote(filename, safe='')
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
         }
-        for s in students
-    ]
+    )
 
 
-@router.get("/distribution")
-async def get_class_distribution(
-    include_inactive: bool = False,
+@router.get("/classes")
+async def get_classes_list(
     session: AsyncSession = Depends(get_async_session)
-) -> Dict:
-    """Получение распределения учеников по классам"""
-    distribution = await StudentManager.get_students_by_class_distribution(
-        session, include_inactive
+):
+    """Получить список всех классов с параллелями"""
+    from sqlalchemy import func, distinct
+
+    # Получаем все уникальные комбинации класс-параллель
+    result = await session.execute(
+        select(Student.class_number, Student.parallel, func.count(Student.id))
+        .where(Student.class_number.isnot(None))
+        .group_by(Student.class_number, Student.parallel)
+        .order_by(Student.class_number, Student.parallel)
     )
-    
-    return {
-        class_num: {
-            "count": len(students),
-            "students": [
-                {
-                    "id": s.id,
-                    "full_name": s.full_name,
-                    "is_registered": s.is_registered
-                }
-                for s in students
-            ]
-        }
-        for class_num, students in distribution.items()
-    }
+
+    classes_data = []
+    for row in result.fetchall():
+        class_num, parallel, count = row
+        classes_data.append({
+            "class_number": class_num,
+            "parallel": parallel,
+            "display": f"{class_num}{parallel or ''}",
+            "students_count": count
+        })
+
+    return {"classes": classes_data}

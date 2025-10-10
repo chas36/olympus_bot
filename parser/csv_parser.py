@@ -77,6 +77,11 @@ class CodesCSVParser:
             
             # Дата для этого предмета
             date_str = dates_row[col_idx].strip() if col_idx < len(dates_row) else ""
+
+            # Парсим дату
+            parsed_date = None
+            if date_str:
+                parsed_date = self._parse_date(date_str)
             
             # Собираем коды из всех строк начиная с 3-й (индекс 2)
             codes = []
@@ -97,7 +102,8 @@ class CodesCSVParser:
             if codes:
                 results.append({
                     "subject": subject,
-                    "date": date_str,
+                    "date": parsed_date,
+                    "date_str": date_str,
                     "class_number": class_number,
                     "codes": codes
                 })
@@ -113,6 +119,37 @@ class CodesCSVParser:
             '/' in code and
             len(code) > 15
         )
+
+    def _parse_date(self, date_str: str) -> Optional[datetime]:
+        """
+        Парсит дату из строки в различных форматах
+
+        Поддерживаемые форматы:
+        - 23.10.2024
+        - 23.10.24
+        - 23/10/2024
+        - 2024-10-23
+        """
+        if not date_str:
+            return None
+
+        # Форматы для парсинга
+        formats = [
+            "%d.%m.%Y",  # 23.10.2024
+            "%d.%m.%y",  # 23.10.24
+            "%d/%m/%Y",  # 23/10/2024
+            "%d/%m/%y",  # 23/10/24
+            "%Y-%m-%d",  # 2024-10-23
+        ]
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+
+        logger.warning(f"Не удалось распарсить дату: {date_str}")
+        return None
 
 
 def parse_codes_csv(file_path: str, encoding: str = 'utf-8') -> List[Dict]:
