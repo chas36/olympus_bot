@@ -129,9 +129,33 @@ class CodesCSVParser:
         - 23.10.24
         - 23/10/2024
         - 2024-10-23
+        - 30 сентября (день месяц)
         """
         if not date_str:
             return None
+
+        # Словарь русских названий месяцев
+        months_ru = {
+            'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4,
+            'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8,
+            'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
+        }
+
+        # Пробуем распарсить формат "30 сентября"
+        date_str_lower = date_str.lower().strip()
+        for month_name, month_num in months_ru.items():
+            if month_name in date_str_lower:
+                # Извлекаем число
+                match = re.search(r'(\d{1,2})', date_str_lower)
+                if match:
+                    day = int(match.group(1))
+                    # Используем текущий год
+                    year = datetime.now().year
+                    try:
+                        return datetime(year, month_num, day)
+                    except ValueError:
+                        logger.warning(f"Некорректная дата: {date_str}")
+                        return None
 
         # Форматы для парсинга
         formats = [

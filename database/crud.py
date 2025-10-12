@@ -76,6 +76,76 @@ async def get_all_students(session: AsyncSession) -> List[Student]:
     return result.scalars().all()
 
 
+async def get_student_by_id(
+    session: AsyncSession,
+    student_id: int
+) -> Optional[Student]:
+    """Получает ученика по ID"""
+    result = await session.execute(
+        select(Student).where(Student.id == student_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def delete_student_by_id(
+    session: AsyncSession,
+    student_id: int
+) -> bool:
+    """Удаляет ученика по ID"""
+    from sqlalchemy import delete
+
+    result = await session.execute(
+        delete(Student).where(Student.id == student_id)
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def get_students_by_class(
+    session: AsyncSession,
+    class_number: int
+) -> List[Student]:
+    """Получает всех учеников определенного класса"""
+    result = await session.execute(
+        select(Student).where(Student.class_number == class_number)
+    )
+    return result.scalars().all()
+
+
+async def delete_students_by_class(
+    session: AsyncSession,
+    class_number: int
+) -> int:
+    """Удаляет всех учеников определенного класса"""
+    from sqlalchemy import delete
+
+    result = await session.execute(
+        delete(Student).where(Student.class_number == class_number)
+    )
+    await session.commit()
+    return result.rowcount
+
+
+async def clear_all_students(session: AsyncSession) -> int:
+    """Удаляет всех учеников из базы данных"""
+    from sqlalchemy import delete
+
+    result = await session.execute(delete(Student))
+    await session.commit()
+    return result.rowcount
+
+
+async def get_all_classes(session: AsyncSession) -> List[int]:
+    """Получает список всех уникальных классов"""
+    result = await session.execute(
+        select(Student.class_number)
+        .where(Student.class_number.isnot(None))
+        .distinct()
+        .order_by(Student.class_number)
+    )
+    return result.scalars().all()
+
+
 # ==================== OLYMPIAD SESSIONS ====================
 
 async def create_olympiad_session(
@@ -126,6 +196,50 @@ async def get_session_by_id(
         select(OlympiadSession).where(OlympiadSession.id == session_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_all_sessions(session: AsyncSession) -> List[OlympiadSession]:
+    """Получает все сессии олимпиад"""
+    result = await session.execute(
+        select(OlympiadSession).order_by(OlympiadSession.date.desc())
+    )
+    return result.scalars().all()
+
+
+async def delete_session_by_id(
+    session: AsyncSession,
+    session_id: int
+) -> bool:
+    """Удаляет сессию олимпиады по ID (вместе со всеми кодами)"""
+    from sqlalchemy import delete
+
+    result = await session.execute(
+        delete(OlympiadSession).where(OlympiadSession.id == session_id)
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def activate_session(
+    session: AsyncSession,
+    session_id: int
+) -> Optional[OlympiadSession]:
+    """Активирует сессию (деактивирует все остальные)"""
+    # Деактивируем все сессии
+    await deactivate_all_sessions(session)
+
+    # Активируем нужную
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.id == session_id)
+    )
+    olympiad_session = result.scalar_one_or_none()
+
+    if olympiad_session:
+        olympiad_session.is_active = True
+        await session.commit()
+        await session.refresh(olympiad_session)
+
+    return olympiad_session
 
 
 # ==================== GRADE 8 CODES ====================

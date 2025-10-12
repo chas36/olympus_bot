@@ -34,7 +34,7 @@ class OlympiadSession(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     subject = Column(String(100), nullable=False, index=True)  # Название предмета
-    class_number = Column(Integer, nullable=False, index=True)  # Класс (4-11)
+    class_number = Column(Integer, nullable=True, index=True)  # Класс (4-11), может быть NULL если коды для разных классов
     date = Column(DateTime, nullable=False, index=True)  # Дата проведения из CSV
     stage = Column(String(50), nullable=True)  # Этап (школьный, муниципальный, и т.д.)
     upload_time = Column(DateTime, default=datetime.utcnow)

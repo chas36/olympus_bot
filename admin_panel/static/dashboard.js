@@ -648,3 +648,353 @@ function exportRegistrationCodes() {
 document.querySelector('button[data-bs-target="#registration-tab"]').addEventListener('click', () => {
     loadClassesData();
 });
+
+// ==================== УПРАВЛЕНИЕ ====================
+
+// Загружаем при переключении на таб управления
+document.querySelector('button[data-bs-target="#management-tab"]').addEventListener('click', () => {
+    loadManagementData();
+});
+
+async function loadManagementData() {
+    // Загружаем классы для селекта
+    try {
+        const response = await fetch('/api/admin/classes');
+        const classes = await response.json();
+
+        const classSelect = document.getElementById('deleteClassSelect');
+        classSelect.innerHTML = '<option value="">-- Выберите класс --</option>';
+
+        classes.forEach(c => {
+            const option = document.createElement('option');
+            option.value = c.class_number;
+            option.textContent = `${c.class_number} класс (${c.total_students} учеников)`;
+            classSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Ошибка загрузки классов:', error);
+    }
+
+    // Загружаем олимпиады для селекта
+    try {
+        const response = await fetch('/api/admin/olympiads');
+        const olympiads = await response.json();
+
+        const olympiadSelect = document.getElementById('olympiadSelect');
+        olympiadSelect.innerHTML = '<option value="">-- Выберите олимпиаду --</option>';
+
+        olympiads.forEach(o => {
+            const option = document.createElement('option');
+            option.value = o.id;
+            option.textContent = `${o.subject} - ${new Date(o.date).toLocaleDateString('ru-RU')}`;
+            option.dataset.olympiad = JSON.stringify(o);
+            olympiadSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Ошибка загрузки олимпиад:', error);
+    }
+}
+
+// Просмотр ученика по ID
+async function viewStudent() {
+    const studentId = document.getElementById('deleteStudentId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/students/${studentId}`);
+        if (!response.ok) {
+            throw new Error('Ученик не найден');
+        }
+
+        const student = await response.json();
+
+        document.getElementById('studentInfo').innerHTML = `
+            <div class="alert alert-info">
+                <strong>ФИО:</strong> ${student.full_name}<br>
+                <strong>Класс:</strong> ${student.class_number || '-'}${student.parallel || ''}<br>
+                <strong>Telegram:</strong> ${student.telegram_id || 'Не зарегистрирован'}<br>
+                <strong>Username:</strong> ${student.telegram_username || '-'}
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('studentInfo').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> ${error.message}
+            </div>
+        `;
+    }
+}
+
+// Удаление ученика
+async function deleteStudent() {
+    const studentId = document.getElementById('deleteStudentId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    if (!confirm(`Вы уверены, что хотите удалить ученика с ID ${studentId}?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/students/${studentId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Ученик успешно удален');
+            document.getElementById('deleteStudentId').value = '';
+            document.getElementById('studentInfo').innerHTML = '';
+            loadDashboard();
+            loadStudentsStats();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка удаления: ' + error.message);
+    }
+}
+
+// Очистка всей базы учеников
+async function clearAllStudents() {
+    const confirmation = prompt('⚠️ ВНИМАНИЕ! Это удалит ВСЕХ учеников из базы данных!\n\nДля подтверждения введите: DELETE_ALL');
+
+    if (confirmation !== 'DELETE_ALL') {
+        alert('Отменено');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/admin/students?confirm=YES_DELETE_ALL', {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✅ База данных очищена. Удалено учеников: ${result.deleted_count}`);
+            loadDashboard();
+            loadStudentsStats();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка очистки: ' + error.message);
+    }
+}
+
+// Просмотр учеников класса
+async function viewClassStudents() {
+    const classNumber = document.getElementById('deleteClassSelect').value;
+    if (!classNumber) {
+        alert('Выберите класс');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/classes/${classNumber}/students`);
+        const students = await response.json();
+
+        if (students.length === 0) {
+            alert('В этом классе нет учеников');
+            return;
+        }
+
+        // Показываем карточку со списком
+        const card = document.getElementById('classStudentsCard');
+        const tbody = document.getElementById('classStudentsTableBody');
+
+        tbody.innerHTML = students.map(s => `
+            <tr>
+                <td>${s.id}</td>
+                <td>${s.full_name}</td>
+                <td>${s.class_number || '-'}${s.parallel || ''}</td>
+                <td>${s.telegram_id || '-'}</td>
+                <td>
+                    ${s.telegram_id
+                        ? '<span class="badge bg-success">Зарегистрирован</span>'
+                        : '<span class="badge bg-warning">Не зарегистрирован</span>'}
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-danger" onclick="deleteStudentById(${s.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        card.style.display = 'block';
+
+        // Прокручиваем к карточке
+        card.scrollIntoView({ behavior: 'smooth' });
+
+        // Обновляем информацию о классе
+        document.getElementById('classInfo').innerHTML = `
+            <div class="alert alert-info">
+                <strong>Класс:</strong> ${classNumber}<br>
+                <strong>Учеников:</strong> ${students.length}
+            </div>
+        `;
+    } catch (error) {
+        alert('❌ Ошибка загрузки учеников: ' + error.message);
+    }
+}
+
+// Удаление ученика по ID (из таблицы)
+async function deleteStudentById(studentId) {
+    if (!confirm(`Удалить ученика с ID ${studentId}?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/students/${studentId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Ученик удален');
+            // Перезагружаем список класса
+            viewClassStudents();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка удаления: ' + error.message);
+    }
+}
+
+// Удаление класса
+async function deleteClass() {
+    const classNumber = document.getElementById('deleteClassSelect').value;
+    if (!classNumber) {
+        alert('Выберите класс');
+        return;
+    }
+
+    const confirmation = prompt(`⚠️ Это удалит ВСЕХ учеников ${classNumber} класса!\n\nДля подтверждения введите номер класса:`);
+
+    if (confirmation !== classNumber) {
+        alert('Отменено');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/classes/${classNumber}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✅ Класс ${classNumber} удален. Удалено учеников: ${result.deleted_count}`);
+            document.getElementById('deleteClassSelect').value = '';
+            document.getElementById('classInfo').innerHTML = '';
+            document.getElementById('classStudentsCard').style.display = 'none';
+            loadManagementData();
+            loadDashboard();
+            loadStudentsStats();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка удаления класса: ' + error.message);
+    }
+}
+
+// Загрузка информации об олимпиаде
+function loadOlympiadInfo() {
+    const select = document.getElementById('olympiadSelect');
+    const selectedOption = select.options[select.selectedIndex];
+
+    if (!selectedOption.value) {
+        document.getElementById('olympiadInfo').innerHTML = '';
+        return;
+    }
+
+    const olympiad = JSON.parse(selectedOption.dataset.olympiad);
+
+    document.getElementById('olympiadInfo').innerHTML = `
+        <div class="alert alert-info">
+            <strong>Предмет:</strong> ${olympiad.subject}<br>
+            <strong>Дата:</strong> ${new Date(olympiad.date).toLocaleDateString('ru-RU')}<br>
+            <strong>Класс:</strong> ${olympiad.class_number || 'Не указан'}<br>
+            <strong>Статус:</strong> ${olympiad.is_active
+                ? '<span class="badge bg-success">Активна</span>'
+                : '<span class="badge bg-secondary">Неактивна</span>'}
+        </div>
+    `;
+}
+
+// Активация олимпиады
+async function activateOlympiad() {
+    const olympiadId = document.getElementById('olympiadSelect').value;
+    if (!olympiadId) {
+        alert('Выберите олимпиаду');
+        return;
+    }
+
+    if (!confirm('Активировать эту олимпиаду? Все остальные будут деактивированы.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/olympiads/${olympiadId}/activate`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Олимпиада активирована!');
+            loadManagementData();
+            loadOlympiadInfo();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка активации: ' + error.message);
+    }
+}
+
+// Удаление олимпиады
+async function deleteOlympiad() {
+    const olympiadId = document.getElementById('olympiadSelect').value;
+    if (!olympiadId) {
+        alert('Выберите олимпиаду');
+        return;
+    }
+
+    if (!confirm('⚠️ Вы уверены, что хотите удалить эту олимпиаду?\nВсе связанные коды будут потеряны!')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/olympiads/${olympiadId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Олимпиада удалена');
+            document.getElementById('olympiadSelect').value = '';
+            document.getElementById('olympiadInfo').innerHTML = '';
+            loadManagementData();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка удаления: ' + error.message);
+    }
+}

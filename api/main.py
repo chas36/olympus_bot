@@ -6,12 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 
 # Импортируем новые роутеры
-from api.routers import students, codes, monitoring
+from api.routers import students, codes, monitoring, admin, dashboard
 
 # Создаем приложение
 app = FastAPI(
     title="Olympus Bot API v2",
-    description="Расширенный API для управления олимпиадами",
+    description="Расширенный API для управления олимпиадами с веб-дашбордом",
     version="2.0.0"
 )
 
@@ -28,6 +28,7 @@ app.add_middleware(
 app.include_router(students.router)
 app.include_router(codes.router)
 app.include_router(monitoring.router)
+app.include_router(admin.router)
 
 # Создаем директории если их нет
 os.makedirs("admin_panel/static", exist_ok=True)
@@ -40,7 +41,7 @@ templates = Jinja2Templates(directory="admin_panel/templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """Главная страница - новая админ-панель v2"""
+    """Главная страница - полнофункциональная админ-панель v2"""
     return templates.TemplateResponse(
         "dashboard_v2.html",
         {"request": request}

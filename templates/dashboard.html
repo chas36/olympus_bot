@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель Olympus Bot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-card h3 {
+            color: #666;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .subtext {
+            color: #999;
+            font-size: 14px;
+        }
+
+        .section {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .section h2 {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        .section h2::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: #667eea;
+            margin-right: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table th {
+            background: #f8f9fa;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        table td {
+            padding: 15px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .chart-container {
+            height: 300px;
+            margin: 20px 0;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header fade-in">
+            <h1>🎓 Админ-панель Olympus Bot</h1>
+            <p>Управление учениками, олимпиадами и статистикой</p>
+        </div>
+
+        <div id="stats" class="stats-grid"></div>
+
+        <div id="olympiadsSection" class="section fade-in">
+            <h2>🏆 Олимпиады</h2>
+            <div id="olympiadsList"></div>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="loadOlympiads()">🔄 Обновить</button>
+                <a href="/docs" class="btn btn-primary" target="_blank">📚 API Документация</a>
+            </div>
+        </div>
+
+        <div id="classesSection" class="section fade-in">
+            <h2>🎓 Классы</h2>
+            <div id="classesChart" class="chart-container">
+                <canvas id="classesCanvas"></canvas>
+            </div>
+        </div>
+
+        <div id="studentsSection" class="section fade-in">
+            <h2>👥 Недавно зарегистрированные</h2>
+            <div id="studentsList"></div>
+            <div class="btn-group">
+                <a href="/api/admin/export/students" class="btn btn-primary" download>📄 Экспорт CSV</a>
+                <a href="/api/admin/export/students/excel" class="btn btn-primary" download>📊 Экспорт Excel</a>
+            </div>
+        </div>
+
+        <div id="actionsSection" class="section fade-in">
+            <h2>⚡ Быстрые действия</h2>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="testNotification()">🔔 Тест уведомлений</button>
+                <button class="btn btn-primary" onclick="loadStatistics()">🔄 Обновить статистику</button>
+                <a href="/api/admin/export/statistics/excel" class="btn btn-primary" download>📊 Экспорт статистики</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/admin';
+
+        // Загрузка статистики
+        async function loadStatistics() {
+            try {
+                const response = await fetch(`${API_BASE}/statistics/overview`);
+                const data = await response.json();
+
+                // Общая статистика
+                const statsHTML = `
+                    <div class="stat-card fade-in">
+                        <h3>Всего учеников</h3>
+                        <div class="value">${data.students.total}</div>
+                        <div class="subtext">
+                            ✅ ${data.students.registered} зарегистрировано
+                        </div>
+                    </div>
+                    <div class="stat-card fade-in">
+                        <h3>Олимпиады</h3>
+                        <div class="value">${data.olympiads.total}</div>
+                        <div class="subtext">
+                            🟢 ${data.olympiads.active} активных
+                        </div>
+                    </div>
+                    <div class="stat-card fade-in">
+                        <h3>Классов</h3>
+                        <div class="value">${data.classes.length}</div>
+                        <div class="subtext">
+                            📚 4-11 классы
+                        </div>
+                    </div>
+                    ${data.active_olympiad ? `
+                    <div class="stat-card fade-in">
+                        <h3>Активная олимпиада</h3>
+                        <div class="value" style="font-size: 20px;">${data.active_olympiad.subject}</div>
+                        <div class="subtext">
+                            📅 ${new Date(data.active_olympiad.date).toLocaleDateString('ru-RU')}
+                        </div>
+                    </div>
+                    ` : ''}
+                `;
+
+                document.getElementById('stats').innerHTML = statsHTML;
+
+                // График по классам
+                drawClassesChart(data.classes);
+
+            } catch (error) {
+                console.error('Ошибка загрузки статистики:', error);
+            }
+        }
+
+        // Загрузка олимпиад
+        async function loadOlympiads() {
+            try {
+                const response = await fetch(`${API_BASE}/olympiads`);
+                const olympiads = await response.json();
+
+                const olympiadsHTML = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Предмет</th>
+                                <th>Класс</th>
+                                <th>Дата</th>
+                                <th>Статус</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${olympiads.map(o => `
+                                <tr>
+                                    <td>${o.id}</td>
+                                    <td><strong>${o.subject}</strong></td>
+                                    <td>${o.class_number || 'Разные'}</td>
+                                    <td>${new Date(o.date).toLocaleDateString('ru-RU')}</td>
+                                    <td>
+                                        ${o.is_active ?
+                                            '<span class="badge badge-success">🟢 Активна</span>' :
+                                            '<span class="badge badge-warning">⚪ Неактивна</span>'}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-primary" onclick="viewOlympiadStats(${o.id})" style="padding: 5px 10px; font-size: 12px;">
+                                            📊 Статистика
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+
+                document.getElementById('olympiadsList').innerHTML = olympiadsHTML;
+            } catch (error) {
+                console.error('Ошибка загрузки олимпиад:', error);
+            }
+        }
+
+        // Загрузка студентов
+        async function loadStudents() {
+            try {
+                const response = await fetch(`${API_BASE}/students/registered`);
+                const students = await response.json();
+
+                const studentsHTML = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ФИО</th>
+                                <th>Класс</th>
+                                <th>Telegram ID</th>
+                                <th>Дата регистрации</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${students.slice(0, 10).map(s => `
+                                <tr>
+                                    <td><strong>${s.full_name}</strong></td>
+                                    <td>${s.class_number || '-'}${s.parallel || ''}</td>
+                                    <td>${s.telegram_id}</td>
+                                    <td>${s.registered_at ? new Date(s.registered_at).toLocaleDateString('ru-RU') : '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ${students.length > 10 ? `<p style="margin-top: 10px; color: #666;">... и еще ${students.length - 10} учеников</p>` : ''}
+                `;
+
+                document.getElementById('studentsList').innerHTML = studentsHTML;
+            } catch (error) {
+                console.error('Ошибка загрузки студентов:', error);
+            }
+        }
+
+        // График классов
+        function drawClassesChart(classes) {
+            const ctx = document.getElementById('classesCanvas');
+            if (!ctx) return;
+
+            const labels = classes.map(c => `${c.class_number} класс`);
+            const registered = classes.map(c => c.registered);
+            const unregistered = classes.map(c => c.unregistered);
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Зарегистрировано',
+                            data: registered,
+                            backgroundColor: '#667eea'
+                        },
+                        {
+                            label: 'Не зарегистрировано',
+                            data: unregistered,
+                            backgroundColor: '#e0e0e0'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Статистика по олимпиаде
+        async function viewOlympiadStats(id) {
+            try {
+                const response = await fetch(`${API_BASE}/statistics/olympiad/${id}`);
+                const data = await response.json();
+
+                alert(`
+📊 Статистика: ${data.olympiad.subject}
+
+📅 Дата: ${new Date(data.olympiad.date).toLocaleDateString('ru-RU')}
+🎓 Класс: ${data.olympiad.class_number || 'Разные'}
+⭐ Статус: ${data.olympiad.is_active ? '🟢 Активна' : '⚪ Неактивна'}
+
+Коды 8 класса:
+  Всего: ${data.codes_grade8.total}
+  Выдано: ${data.codes_grade8.issued}
+
+Коды 9+ классов:
+  Всего: ${data.codes_grade9.total}
+  Использовано: ${data.codes_grade9.used}
+  Осталось: ${data.codes_grade9.available}
+
+Запросы кодов: ${data.requests.total}
+Скриншоты: ${data.requests.with_screenshot}
+Процент сдачи: ${data.requests.completion_rate}%
+                `);
+            } catch (error) {
+                alert('Ошибка загрузки статистики');
+            }
+        }
+
+        // Тест уведомлений
+        async function testNotification() {
+            try {
+                const response = await fetch(`${API_BASE}/notifications/test`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                alert('✅ ' + data.message);
+            } catch (error) {
+                alert('❌ Ошибка отправки уведомления');
+            }
+        }
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStatistics();
+            loadOlympiads();
+            loadStudents();
+
+            // Автообновление каждые 30 секунд
+            setInterval(() => {
+                loadStatistics();
+                loadOlympiads();
+            }, 30000);
+        });
+    </script>
+</body>
+</html>
