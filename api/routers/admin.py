@@ -295,7 +295,6 @@ async def get_students_by_class(
             "registration_code": s.registration_code,
             "is_registered": s.is_registered,
             "telegram_id": s.telegram_id,
-            "telegram_username": s.telegram_username,
             "created_at": s.created_at.isoformat(),
             "registered_at": s.registered_at.isoformat() if s.registered_at else None
         }
@@ -394,6 +393,22 @@ async def delete_olympiad(
         "session_id": session_id,
         "subject": olympiad_session.subject,
         "message": f"Олимпиада '{olympiad_session.subject}' удалена"
+    }
+
+
+@router.delete("/olympiads")
+async def delete_all_olympiads(
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Удалить все олимпиады (вместе со всеми кодами)
+    """
+    count = await crud.delete_all_sessions(session)
+
+    return {
+        "success": True,
+        "deleted_count": count,
+        "message": f"Удалено олимпиад: {count}"
     }
 
 
