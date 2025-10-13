@@ -27,8 +27,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.database import get_async_session
-from database.models import Student, OlympiadSession
-from database.new_models import OlympiadCode, Grade8ReserveCode
+from database.models import Student, OlympiadSession, OlympiadCode, Grade8ReserveCode
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
