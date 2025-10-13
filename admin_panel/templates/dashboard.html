@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Olympus Bot - Панель управления</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .stat-card {
+            border-left: 4px solid;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-card.primary { border-left-color: #0d6efd; }
+        .stat-card.success { border-left-color: #198754; }
+        .stat-card.warning { border-left-color: #ffc107; }
+        .stat-card.danger { border-left-color: #dc3545; }
+        .table-hover tbody tr:hover {
+            background-color: #e9ecef;
+        }
+        .status-badge {
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="bi bi-trophy"></i> Olympus Bot - Панель управления
+            </span>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="bi bi-cloud-upload"></i> Загрузка файла олимпиады
+                        </h5>
+                        <form id="uploadForm" class="mt-3">
+                            <div class="row g-3 align-items-end">
+                                <div class="col-md-8">
+                                    <label for="fileInput" class="form-label">Выберите .docx файл</label>
+                                    <input type="file" class="form-control" id="fileInput" accept=".doc,.docx" required>
+                                </div>
+                                <div class="col-md-4">
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="bi bi-upload"></i> Загрузить
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                        <div id="uploadResult" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4" id="statsSection">
+            <!-- Статистика будет загружена динамически -->
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="card-title mb-0">
+                                <i class="bi bi-people"></i> Список учеников
+                            </h5>
+                            <div>
+                                <button class="btn btn-sm btn-success" onclick="exportToCSV()">
+                                    <i class="bi bi-download"></i> Экспорт CSV
+                                </button>
+                                <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addStudentModal">
+                                    <i class="bi bi-plus-circle"></i> Добавить ученика
+                                </button>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="studentsTable">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>ФИО</th>
+                                        <th>Статус</th>
+                                        <th>Класс</th>
+                                        <th>Код получен</th>
+                                        <th>Скриншот</th>
+                                        <th>Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Данные будут загружены динамически -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно добавления ученика -->
+    <div class="modal fade" id="addStudentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Добавить ученика</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addStudentForm">
+                        <div class="mb-3">
+                            <label for="studentName" class="form-label">ФИО ученика</label>
+                            <input type="text" class="form-control" id="studentName" required>
+                        </div>
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> Регистрационный код будет сгенерирован автоматически
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" onclick="addStudent()">Добавить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно просмотра скриншота -->
+    <div class="modal fade" id="screenshotModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Скриншот работы</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="screenshotImage" src="" class="img-fluid" alt="Скриншот">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Загрузка статистики при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStatistics();
+            loadStudentsStatus();
+            setInterval(loadStatistics, 30000); // Обновление каждые 30 секунд
+            setInterval(loadStudentsStatus, 30000);
+        });
+
+        // Загрузка файла
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Выберите файл');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const resultDiv = document.getElementById('uploadResult');
+            resultDiv.innerHTML = '<div class="alert alert-info">Загрузка и обработка файла...</div>';
+
+            try {
+                const response = await fetch('/upload/olympiad-file', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    let html = `
+                        <div class="alert alert-success">
+                            <strong>✅ Файл успешно загружен!</strong><br>
+                            Предмет: ${result.subject}<br>
+                            Кодов 8 класса: ${result.grade8_codes_created}<br>
+                            Кодов 9 класса: ${result.grade9_codes_created}
+                        </div>
+                    `;
+                    
+                    if (result.warning) {
+                        html += `
+                            <div class="alert alert-warning">
+                                <strong>⚠️ Внимание:</strong> ${result.warning.message}<br>
+                                <ul class="mt-2 mb-0">
+                                    ${result.warning.students.map(s => `<li>${s}</li>`).join('')}
+                                </ul>
+                            </div>
+                        `;
+                    }
+                    
+                    resultDiv.innerHTML = html;
+                    fileInput.value = '';
+                    loadStatistics();
+                    loadStudentsStatus();
+                } else {
+                    resultDiv.innerHTML = `<div class="alert alert-danger">Ошибка: ${result.detail}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="alert alert-danger">Ошибка загрузки: ${error.message}</div>`;
+            }
+        });
+
+        // Загрузка статистики
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/monitoring/statistics');
+                const stats = await response.json();
+
+                if (!stats.active_session) {
+                    document.getElementById('statsSection').innerHTML = `
+                        <div class="col-12">
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle"></i> Нет активной олимпиады. Загрузите файл для начала.
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                document.getElementById('statsSection').innerHTML = `
+                    <div class="col-12 mb-3">
+                        <div class="alert alert-primary">
+                            <strong>📚 Текущая олимпиада:</strong> ${stats.active_session.subject} 
+                            (загружено: ${new Date(stats.active_session.date).toLocaleString('ru-RU')})
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card stat-card primary">
+                            <div class="card-body">
+                                <h6 class="text-muted">Всего учеников</h6>
+                                <h2>${stats.students.total}</h2>
+                                <small class="text-success">Зарегистрировано: ${stats.students.registered}</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card stat-card success">
+                            <div class="card-body">
+                                <h6 class="text-muted">Кодов запрошено</h6>
+                                <h2>${stats.codes.total_requested}</h2>
+                                <small>8 кл: ${stats.codes.grade8_requested} | 9 кл: ${stats.codes.grade9_requested}</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card stat-card warning">
+                            <div class="card-body">
+                                <h6 class="text-muted">Скриншотов получено</h6>
+                                <h2>${stats.screenshots.submitted}</h2>
+                                <small>${stats.screenshots.percentage}% от запросивших</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card stat-card danger">
+                            <div class="card-body">
+                                <h6 class="text-muted">Скриншотов не прислано</h6>
+                                <h2>${stats.screenshots.missing}</h2>
+                                <small class="text-muted">Доступно кодов 9кл: ${stats.codes.grade9_available}</small>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Ошибка загрузки статистики:', error);
+            }
+        }
+
+        // Загрузка статуса учеников
+        async function loadStudentsStatus() {
+            try {
+                const response = await fetch('/monitoring/students-status');
+                const students = await response.json();
+
+                const tbody = document.querySelector('#studentsTable tbody');
+                tbody.innerHTML = students.map(student => `
+                    <tr>
+                        <td>${student.full_name}</td>
+                        <td>
+                            ${student.is_registered 
+                                ? '<span class="badge bg-success status-badge">Зарегистрирован</span>' 
+                                : '<span class="badge bg-secondary status-badge">Не зарегистрирован</span>'}
+                        </td>
+                        <td>${student.grade || '-'}</td>
+                        <td>
+                            ${student.code_requested 
+                                ? `<span class="badge bg-primary status-badge">${new Date(student.requested_at).toLocaleTimeString('ru-RU')}</span>` 
+                                : '<span class="text-muted">-</span>'}
+                        </td>
+                        <td>
+                            ${student.screenshot_submitted 
+                                ? '<span class="badge bg-success status-badge">✓ Прислан</span>' 
+                                : student.code_requested 
+                                    ? '<span class="badge bg-danger status-badge">✗ Не прислан</span>'
+                                    : '<span class="text-muted">-</span>'}
+                        </td>
+                        <td>
+                            ${student.screenshot_path 
+                                ? `<button class="btn btn-sm btn-outline-primary" onclick="viewScreenshot('${student.screenshot_path}')">
+                                    <i class="bi bi-eye"></i> Просмотр
+                                   </button>` 
+                                : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Ошибка загрузки списка учеников:', error);
+            }
+        }
+
+        // Добавление ученика
+        async function addStudent() {
+            const name = document.getElementById('studentName').value.trim();
+            
+            if (!name) {
+                alert('Введите ФИО ученика');
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/students', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ full_name: name })
+                });
+
+                const result = await response.json();
+
+                alert(`Ученик добавлен!\nФИО: ${result.full_name}\nКод регистрации: ${result.registration_code}`);
+                
+                document.getElementById('studentName').value = '';
+                bootstrap.Modal.getInstance(document.getElementById('addStudentModal')).hide();
+                loadStudentsStatus();
+            } catch (error) {
+                alert('Ошибка добавления ученика: ' + error.message);
+            }
+        }
+
+        // Просмотр скриншота
+        function viewScreenshot(path) {
+            document.getElementById('screenshotImage').src = '/' + path;
+            new bootstrap.Modal(document.getElementById('screenshotModal')).show();
+        }
+
+        // Экспорт в CSV с проверкой аутентификации
+        async function exportToCSV() {
+            try {
+                const authResponse = await fetch('/admin/check-auth', { credentials: 'include' });
+                const authResult = await authResponse.json();
+                if (authResult.authenticated) {
+                    window.location.href = '/admin/export/students';
+                } else {
+                    alert('Для экспорта данных необходимо войти в систему.');
+                }
+            } catch (error) {
+                alert('Ошибка проверки аутентификации: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
