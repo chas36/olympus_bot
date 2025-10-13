@@ -45,7 +45,7 @@ async def cmd_get_code(message: Message, state: FSMContext):
         existing_request = await crud.get_code_request_for_student_in_session(
             session, student.id, active_session.id
         )
-        
+
         if existing_request:
             screenshot_status = "✅ Прислан" if existing_request.screenshot_submitted else "❌ Не прислан"
             await message.answer(
@@ -57,20 +57,67 @@ async def cmd_get_code(message: Message, state: FSMContext):
                 parse_mode="Markdown"
             )
             return
-        
-        # Сохраняем ID сессии в состоянии
-        await state.update_data(session_id=active_session.id)
-        
-        # Проверяем доступность кодов 9 класса
-        available_grade9 = await crud.count_available_grade9_codes(session, active_session.id)
-        
-        await message.answer(
-            f"📚 {active_session.subject}\n\n"
-            f"Выбери класс, который будешь писать:",
-            reply_markup=get_grade_selection_keyboard(available_grade9 > 0)
-        )
-        
-        await state.set_state(OlympiadStates.selecting_grade)
+
+        # Проверяем класс ученика
+        if not student.class_number:
+            await message.answer(
+                "❌ Твой класс не указан в системе!\n\n"
+                "Обратись к преподавателю."
+            )
+            return
+
+        # Только для 8 класса показываем выбор между 8 и 9 классом
+        if student.class_number == 8:
+            # Сохраняем ID сессии в состоянии
+            await state.update_data(session_id=active_session.id)
+
+            # Проверяем доступность кодов 9 класса
+            available_grade9 = await crud.count_available_grade9_codes(session, active_session.id)
+
+            await message.answer(
+                f"📚 {active_session.subject}\n\n"
+                f"Выбери класс, который будешь писать:",
+                reply_markup=get_grade_selection_keyboard(available_grade9 > 0)
+            )
+
+            await state.set_state(OlympiadStates.selecting_grade)
+        else:
+            # Для остальных классов (4-7, 9-11) сразу выдаем их именной код
+            grade8_code = await crud.get_grade8_code_for_student(
+                session, student.id, active_session.id
+            )
+
+            if not grade8_code:
+                await message.answer(
+                    f"❌ Для тебя не найден код!\n\n"
+                    f"Обратись к преподавателю."
+                )
+                return
+
+            code = grade8_code.code
+
+            # Помечаем код как выданный
+            await crud.mark_grade8_code_issued(session, grade8_code.id)
+
+            # Создаем запись о запросе кода
+            await crud.create_code_request(
+                session, student.id, active_session.id, student.class_number, code
+            )
+
+            # Первое сообщение - информация
+            await message.answer(
+                f"✅ Твой код для олимпиады по предмету {active_session.subject}:\n\n"
+                f"📋 Класс: {student.class_number}\n\n"
+                f"⚠️ ВАЖНО: После завершения работы обязательно пришли в бот "
+                f"скриншот или фотографию последней страницы!\n\n"
+                f"💡 Просто отправь фото в этот чат."
+            )
+
+            # Второе сообщение - только код для удобного копирования
+            await message.answer(
+                f"🔑 <code>{code}</code>",
+                parse_mode="HTML"
+            )
 
 
 @router.callback_query(OlympiadStates.selecting_grade, F.data.in_(["grade_8", "grade_9"]))

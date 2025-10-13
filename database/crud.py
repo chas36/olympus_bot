@@ -76,6 +76,119 @@ async def get_all_students(session: AsyncSession) -> List[Student]:
     return result.scalars().all()
 
 
+async def get_student_by_id(
+    session: AsyncSession,
+    student_id: int
+) -> Optional[Student]:
+    """Получает ученика по ID"""
+    result = await session.execute(
+        select(Student).where(Student.id == student_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def delete_student_by_id(
+    session: AsyncSession,
+    student_id: int
+) -> bool:
+    """Удаляет ученика по ID"""
+    from sqlalchemy import delete
+
+    result = await session.execute(
+        delete(Student).where(Student.id == student_id)
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def get_students_by_class(
+    session: AsyncSession,
+    class_number: int
+) -> List[Student]:
+    """Получает всех учеников определенного класса"""
+    result = await session.execute(
+        select(Student).where(Student.class_number == class_number)
+    )
+    return result.scalars().all()
+
+
+async def delete_students_by_class(
+    session: AsyncSession,
+    class_number: int
+) -> int:
+    """Удаляет всех учеников определенного класса"""
+    from sqlalchemy import delete, update, select
+    from .models import Grade8Code, Grade9Code, CodeRequest, OlympiadCode, Grade8ReserveCode
+
+    # Получаем ID всех студентов в этом классе
+    result = await session.execute(
+        select(Student.id).where(Student.class_number == class_number)
+    )
+    student_ids = [row[0] for row in result.fetchall()]
+
+    if not student_ids:
+        return 0
+
+    # Удаляем/обновляем связанные записи
+    # 1. Удаляем запросы кодов
+    await session.execute(
+        delete(CodeRequest).where(CodeRequest.student_id.in_(student_ids))
+    )
+
+    # 2. Удаляем записи Grade8Code
+    await session.execute(
+        delete(Grade8Code).where(Grade8Code.student_id.in_(student_ids))
+    )
+
+    # 3. Обнуляем assigned_student_id в Grade9Code
+    await session.execute(
+        update(Grade9Code)
+        .where(Grade9Code.assigned_student_id.in_(student_ids))
+        .values(assigned_student_id=None, is_used=False, assigned_at=None)
+    )
+
+    # 4. Обнуляем student_id в OlympiadCode
+    await session.execute(
+        update(OlympiadCode)
+        .where(OlympiadCode.student_id.in_(student_ids))
+        .values(student_id=None, is_assigned=False, assigned_at=None)
+    )
+
+    # 5. Обнуляем used_by_student_id в Grade8ReserveCode
+    await session.execute(
+        update(Grade8ReserveCode)
+        .where(Grade8ReserveCode.used_by_student_id.in_(student_ids))
+        .values(used_by_student_id=None, is_used=False, used_at=None)
+    )
+
+    # 6. Теперь можно безопасно удалить студентов
+    result = await session.execute(
+        delete(Student).where(Student.class_number == class_number)
+    )
+    await session.commit()
+    return result.rowcount
+
+
+async def clear_all_students(session: AsyncSession) -> int:
+    """Удаляет всех учеников из базы данных"""
+    from sqlalchemy import delete
+
+    result = await session.execute(delete(Student))
+    await session.commit()
+    return result.rowcount
+
+
+async def get_all_classes(session: AsyncSession) -> List[int]:
+    """Получает список всех уникальных классов"""
+    result = await session.execute(
+        select(Student.class_number)
+        .where(Student.class_number.isnot(None))
+        .distinct()
+        .order_by(Student.class_number)
+    )
+    return result.scalars().all()
+
+
 # ==================== OLYMPIAD SESSIONS ====================
 
 async def create_olympiad_session(
@@ -126,6 +239,75 @@ async def get_session_by_id(
         select(OlympiadSession).where(OlympiadSession.id == session_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_all_sessions(session: AsyncSession) -> List[OlympiadSession]:
+    """Получает все сессии олимпиад"""
+    result = await session.execute(
+        select(OlympiadSession).order_by(OlympiadSession.date.desc())
+    )
+    return result.scalars().all()
+
+
+async def delete_session_by_id(
+    session: AsyncSession,
+    session_id: int
+) -> bool:
+    """Удаляет сессию олимпиады по ID (вместе со всеми кодами)"""
+    from sqlalchemy import delete
+
+    result = await session.execute(
+        delete(OlympiadSession).where(OlympiadSession.id == session_id)
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def delete_all_sessions(session: AsyncSession) -> int:
+    """Удаляет все сессии олимпиад (вместе со всеми кодами)"""
+    from sqlalchemy import delete
+    from .models import Grade8Code, Grade9Code, CodeRequest, Reminder
+
+    # Сначала удаляем все связанные записи
+    # 1. Удаляем напоминания
+    await session.execute(delete(Reminder))
+
+    # 2. Удаляем запросы кодов
+    await session.execute(delete(CodeRequest))
+
+    # 3. Удаляем коды 8 класса
+    await session.execute(delete(Grade8Code))
+
+    # 4. Удаляем коды 9 класса
+    await session.execute(delete(Grade9Code))
+
+    # 5. Теперь можно безопасно удалить все сессии
+    # (OlympiadCode и Grade8ReserveCode удалятся автоматически через CASCADE)
+    result = await session.execute(delete(OlympiadSession))
+    await session.commit()
+    return result.rowcount
+
+
+async def activate_session(
+    session: AsyncSession,
+    session_id: int
+) -> Optional[OlympiadSession]:
+    """Активирует сессию (деактивирует все остальные)"""
+    # Деактивируем все сессии
+    await deactivate_all_sessions(session)
+
+    # Активируем нужную
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.id == session_id)
+    )
+    olympiad_session = result.scalar_one_or_none()
+
+    if olympiad_session:
+        olympiad_session.is_active = True
+        await session.commit()
+        await session.refresh(olympiad_session)
+
+    return olympiad_session
 
 
 # ==================== GRADE 8 CODES ====================

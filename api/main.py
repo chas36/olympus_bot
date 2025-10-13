@@ -3,17 +3,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from api.routers import upload, monitoring, admin
 import os
 
-# Создаем приложение FastAPI
+# Импортируем новые роутеры
+from api.routers import students, codes, monitoring, admin, dashboard
+
+# Создаем приложение
 app = FastAPI(
-    title="Olympus Bot API",
-    description="API для управления олимпиадами",
-    version="1.0.0"
+    title="Olympus Bot API v2",
+    description="Расширенный API для управления олимпиадами с веб-дашбордом",
+    version="2.0.0"
 )
 
-# CORS middleware для возможности обращения из браузера
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,32 +25,53 @@ app.add_middleware(
 )
 
 # Подключаем роутеры
-app.include_router(upload.router)
+app.include_router(students.router)
+app.include_router(codes.router)
 app.include_router(monitoring.router)
 app.include_router(admin.router)
 
-# Настройка шаблонов и статики
-templates = Jinja2Templates(directory="admin_panel/templates")
-app.mount("/static", StaticFiles(directory="admin_panel/static"), name="static")
-
-# Создаем папки если их нет
-os.makedirs("admin_panel/templates", exist_ok=True)
+# Создаем директории если их нет
 os.makedirs("admin_panel/static", exist_ok=True)
+os.makedirs("admin_panel/templates", exist_ok=True)
+
+# Статические файлы и шаблоны
+app.mount("/static", StaticFiles(directory="admin_panel/static"), name="static")
+templates = Jinja2Templates(directory="admin_panel/templates")
 
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """Главная страница"""
+    """Главная страница - полнофункциональная админ-панель v2"""
     return templates.TemplateResponse(
-        "dashboard.html",
+        "dashboard_v2.html",
         {"request": request}
     )
 
 
 @app.get("/health")
 async def health_check():
-    """Проверка работоспособности API"""
-    return {"status": "ok", "message": "API is running"}
+    """Проверка работоспособности"""
+    return {
+        "status": "ok",
+        "version": "2.0.0",
+        "message": "Olympus Bot API v2 is running"
+    }
+
+
+@app.get("/api/info")
+async def api_info():
+    """Информация об API"""
+    return {
+        "name": "Olympus Bot API",
+        "version": "2.0.0",
+        "features": [
+            "Управление учениками",
+            "Загрузка из Excel и CSV",
+            "Автоматическое резервирование кодов 9→8",
+            "Мониторинг в реальном времени",
+            "Экспорт данных"
+        ]
+    }
 
 
 if __name__ == "__main__":
@@ -61,6 +84,5 @@ if __name__ == "__main__":
         "api.main:app",
         host=host,
         port=port,
-        reload=True,
-        log_level="info"
+        reload=True
     )

@@ -43,3 +43,16 @@ Thumbs.db
 # Alembic
 alembic/versions/*.py
 !alembic/versions/.gitkeep
+
+# Data files
+data/csv/*.csv
+data/excel/*.xlsx
+!data/csv/.gitkeep
+!data/excel/.gitkeep
+
+# Exports
+exports/
+distribution_results/
+
+# Archive
+archive/
