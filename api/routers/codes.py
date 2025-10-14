@@ -362,6 +362,14 @@ async def export_session_codes(
     )
     universal_codes = result.scalars().all()
 
+    # Получаем резервные коды для 8 класса (из пула 9 класса)
+    result = await session.execute(
+        select(Grade8ReserveCode)
+        .where(Grade8ReserveCode.session_id == session_id)
+        .order_by(Grade8ReserveCode.class_parallel)
+    )
+    reserve_codes = result.scalars().all()
+
     # Группируем коды по классам и параллелям
     codes_by_class_parallel = {}
     for code in universal_codes:
@@ -377,6 +385,14 @@ async def export_session_codes(
                 codes_by_class_parallel[class_key][parallel] = []
 
             codes_by_class_parallel[class_key][parallel].append(code)
+
+    # Добавляем резервные коды для 8 класса
+    reserve_by_parallel = {}
+    for reserve_code in reserve_codes:
+        parallel = reserve_code.class_parallel.replace('8', '')  # "8А" -> "А"
+        if parallel not in reserve_by_parallel:
+            reserve_by_parallel[parallel] = []
+        reserve_by_parallel[parallel].append(reserve_code)
 
     # Создаём временную директорию для файлов
     zip_buffer = io.BytesIO()
@@ -414,6 +430,23 @@ async def export_session_codes(
                     if code.student:
                         ws[f'A{row}'] = code.student.full_name
                         ws[f'B{row}'] = code.code
+                        row += 1
+
+                # Добавляем резервные коды для 8 класса
+                if class_num == 8 and parallel in reserve_by_parallel:
+                    # Добавляем разделитель
+                    if row > 4:  # Есть основные коды
+                        row += 1
+                        ws[f'A{row}'] = "РЕЗЕРВНЫЕ КОДЫ (из пула 9 класса)"
+                        ws[f'A{row}'].font = Font(bold=True, italic=True)
+                        ws.merge_cells(f'A{row}:B{row}')
+                        ws[f'A{row}'].fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+                        row += 1
+
+                    # Добавляем резервные коды
+                    for reserve_code in reserve_by_parallel[parallel]:
+                        ws[f'A{row}'] = "Резервный код"
+                        ws[f'B{row}'] = reserve_code.code
                         row += 1
 
                 # Ширина колонок
