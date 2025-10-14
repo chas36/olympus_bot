@@ -2,8 +2,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from database.models import (
-    Student, OlympiadSession, Grade8Code, Grade9Code, 
-    CodeRequest, Reminder
+    Student, OlympiadSession, Grade8Code, Grade9Code,
+    CodeRequest, Reminder, OlympiadCode, Grade8ReserveCode
 )
 from typing import Optional, List
 from datetime import datetime
@@ -549,3 +549,147 @@ async def get_reminders_for_request(
         select(Reminder).where(Reminder.request_id == request_id)
     )
     return result.scalars().all()
+
+
+# ==================== UNIVERSAL OLYMPIAD CODES (5-11 grades) ====================
+
+async def get_assigned_code_for_student(
+    session: AsyncSession,
+    student_id: int,
+    session_id: int,
+    class_number: int
+) -> Optional[OlympiadCode]:
+    """
+    Получает распределенный код для ученика (Вариант 1)
+
+    Используется когда коды были предварительно распределены скриптом
+    """
+    result = await session.execute(
+        select(OlympiadCode).where(
+            and_(
+                OlympiadCode.student_id == student_id,
+                OlympiadCode.session_id == session_id,
+                OlympiadCode.class_number == class_number,
+                OlympiadCode.is_assigned == True
+            )
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_available_code_for_class(
+    session: AsyncSession,
+    session_id: int,
+    class_number: int
+) -> Optional[OlympiadCode]:
+    """
+    Получает первый доступный код для класса (Вариант 2)
+
+    Используется для выдачи кодов по запросу без предварительного распределения
+    """
+    result = await session.execute(
+        select(OlympiadCode).where(
+            and_(
+                OlympiadCode.session_id == session_id,
+                OlympiadCode.class_number == class_number,
+                OlympiadCode.is_issued == False
+            )
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def mark_code_issued(
+    session: AsyncSession,
+    code_id: int,
+    student_id: Optional[int] = None
+):
+    """Помечает код как выданный"""
+    result = await session.execute(
+        select(OlympiadCode).where(OlympiadCode.id == code_id)
+    )
+    code = result.scalar_one_or_none()
+
+    if code:
+        code.is_issued = True
+        code.issued_at = datetime.utcnow()
+        if student_id and not code.student_id:
+            code.student_id = student_id
+        await session.commit()
+
+
+async def count_available_codes_for_class(
+    session: AsyncSession,
+    session_id: int,
+    class_number: int
+) -> int:
+    """Считает доступные коды для класса"""
+    result = await session.execute(
+        select(func.count(OlympiadCode.id)).where(
+            and_(
+                OlympiadCode.session_id == session_id,
+                OlympiadCode.class_number == class_number,
+                OlympiadCode.is_issued == False
+            )
+        )
+    )
+    return result.scalar() or 0
+
+
+async def get_available_reserve_code_for_grade8(
+    session: AsyncSession,
+    session_id: int,
+    class_parallel: str
+) -> Optional[Grade8ReserveCode]:
+    """
+    Получает доступный резервный код для 8 класса
+
+    Args:
+        class_parallel: например "8А", "8Б", "8В"
+    """
+    result = await session.execute(
+        select(Grade8ReserveCode).where(
+            and_(
+                Grade8ReserveCode.session_id == session_id,
+                Grade8ReserveCode.class_parallel == class_parallel,
+                Grade8ReserveCode.is_used == False
+            )
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def mark_reserve_code_used(
+    session: AsyncSession,
+    code_id: int,
+    student_id: int
+):
+    """Помечает резервный код как использованный"""
+    result = await session.execute(
+        select(Grade8ReserveCode).where(Grade8ReserveCode.id == code_id)
+    )
+    code = result.scalar_one_or_none()
+
+    if code:
+        code.is_used = True
+        code.used_by_student_id = student_id
+        code.used_at = datetime.utcnow()
+        await session.commit()
+
+
+async def count_available_reserve_codes_for_grade8(
+    session: AsyncSession,
+    session_id: int,
+    class_parallel: str
+) -> int:
+    """Считает доступные резервные коды для параллели 8 класса"""
+    result = await session.execute(
+        select(func.count(Grade8ReserveCode.id)).where(
+            and_(
+                Grade8ReserveCode.session_id == session_id,
+                Grade8ReserveCode.class_parallel == class_parallel,
+                Grade8ReserveCode.is_used == False
+            )
+        )
+    )
+    return result.scalar() or 0

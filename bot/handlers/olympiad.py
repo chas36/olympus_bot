@@ -71,33 +71,43 @@ async def cmd_get_code(message: Message, state: FSMContext):
             # Сохраняем ID сессии в состоянии
             await state.update_data(session_id=active_session.id)
 
-            # Проверяем доступность кодов 9 класса
-            available_grade9 = await crud.count_available_grade9_codes(session, active_session.id)
+            # Проверяем доступность резервных кодов 9 класса для 8-классников
+            class_parallel = f"8{student.parallel or ''}"
+            available_reserve = await crud.count_available_reserve_codes_for_grade8(
+                session, active_session.id, class_parallel
+            )
 
             await message.answer(
                 f"📚 {active_session.subject}\n\n"
                 f"Выбери класс, который будешь писать:",
-                reply_markup=get_grade_selection_keyboard(available_grade9 > 0)
+                reply_markup=get_grade_selection_keyboard(available_reserve > 0)
             )
 
             await state.set_state(OlympiadStates.selecting_grade)
         else:
-            # Для остальных классов (4-7, 9-11) сразу выдаем их именной код
-            grade8_code = await crud.get_grade8_code_for_student(
-                session, student.id, active_session.id
+            # Для остальных классов (5-7, 9-11) выдаем код для их класса
+            # Сначала пробуем найти предварительно распределенный код (Вариант 1)
+            olympiad_code = await crud.get_assigned_code_for_student(
+                session, student.id, active_session.id, student.class_number
             )
 
-            if not grade8_code:
+            # Если нет распределенного - берем любой доступный (Вариант 2)
+            if not olympiad_code:
+                olympiad_code = await crud.get_available_code_for_class(
+                    session, active_session.id, student.class_number
+                )
+
+            if not olympiad_code:
                 await message.answer(
                     f"❌ Для тебя не найден код!\n\n"
                     f"Обратись к преподавателю."
                 )
                 return
 
-            code = grade8_code.code
+            code = olympiad_code.code
 
             # Помечаем код как выданный
-            await crud.mark_grade8_code_issued(session, grade8_code.id)
+            await crud.mark_code_issued(session, olympiad_code.id, student.id)
 
             # Создаем запись о запросе кода
             await crud.create_code_request(
@@ -144,12 +154,19 @@ async def process_grade_selection(callback: CallbackQuery, state: FSMContext):
         
         # Получаем код в зависимости от выбранного класса
         if selected_grade == 8:
-            # Получаем именной код 8 класса
-            grade8_code = await crud.get_grade8_code_for_student(
-                session, student.id, session_id
+            # Получаем код для 8 класса
+            # Сначала пробуем предварительно распределенный (Вариант 1)
+            olympiad_code = await crud.get_assigned_code_for_student(
+                session, student.id, session_id, 8
             )
-            
-            if not grade8_code:
+
+            # Если нет - берем любой доступный (Вариант 2)
+            if not olympiad_code:
+                olympiad_code = await crud.get_available_code_for_class(
+                    session, session_id, 8
+                )
+
+            if not olympiad_code:
                 await callback.message.answer(
                     "❌ Для тебя не найден код 8 класса!\n\n"
                     "Обратись к преподавателю."
@@ -157,28 +174,31 @@ async def process_grade_selection(callback: CallbackQuery, state: FSMContext):
                 await callback.answer()
                 await state.clear()
                 return
-            
-            code = grade8_code.code
-            
+
+            code = olympiad_code.code
+
             # Помечаем код как выданный
-            await crud.mark_grade8_code_issued(session, grade8_code.id)
-            
-        else:  # grade 9
-            # Получаем свободный код 9 класса
-            grade9_code = await crud.get_available_grade9_code(session, session_id)
-            
-            if not grade9_code:
+            await crud.mark_code_issued(session, olympiad_code.id, student.id)
+
+        else:  # grade 9 - резервные коды из пула 9 класса
+            # Получаем резервный код для параллели ученика
+            class_parallel = f"8{student.parallel or ''}"
+            reserve_code = await crud.get_available_reserve_code_for_grade8(
+                session, session_id, class_parallel
+            )
+
+            if not reserve_code:
                 await callback.message.answer(
-                    "❌ К сожалению, все коды для 9 класса уже заняты!\n\n"
+                    "❌ К сожалению, все резервные коды для 9 класса уже заняты!\n\n"
                     "Ты можешь взять код для 8 класса."
                 )
                 await callback.answer()
                 return
-            
-            code = grade9_code.code
-            
-            # Присваиваем код ученику
-            await crud.assign_grade9_code(session, grade9_code.id, student.id)
+
+            code = reserve_code.code
+
+            # Помечаем резервный код как использованный
+            await crud.mark_reserve_code_used(session, reserve_code.id, student.id)
         
         # Создаем запись о запросе кода
         code_request = await crud.create_code_request(

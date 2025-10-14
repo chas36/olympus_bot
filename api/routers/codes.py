@@ -1,18 +1,20 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, Integer
 from typing import List, Dict
 import tempfile
 import os
 import io
 import csv
+import logging
 
 from database.database import get_async_session
-from database.models import OlympiadSession, Grade8Code, Grade9Code, Student
+from database.models import OlympiadSession, Grade8Code, Grade9Code, Student, OlympiadCode, Grade8ReserveCode
 from parser.csv_parser import parse_codes_csv
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/codes", tags=["Codes"])
 
 
@@ -43,8 +45,11 @@ async def upload_codes_csv(
             tmp_path = tmp.name
 
         try:
-            # Парсим
-            parsed = parse_codes_csv(tmp_path, encoding='windows-1251')
+            # Парсим - пробуем сначала utf-8, потом windows-1251
+            try:
+                parsed = parse_codes_csv(tmp_path, encoding='utf-8')
+            except UnicodeDecodeError:
+                parsed = parse_codes_csv(tmp_path, encoding='windows-1251')
 
             for subject_data in parsed:
                 subject = subject_data['subject']
@@ -102,26 +107,17 @@ async def upload_codes_csv(
 
         await session.flush()
 
-        # Добавляем коды всех классов
+        # Добавляем коды всех классов (универсальная система 5-11)
         for class_num, codes in data['codes_by_class'].items():
-            if class_num == 8:
-                for code_str in codes:
-                    code = Grade8Code(
-                        student_id=None,
-                        session_id=olympiad.id,
-                        code=code_str,
-                        is_issued=False
-                    )
-                    session.add(code)
-
-            elif class_num == 9:
-                for code_str in codes:
-                    code = Grade9Code(
-                        session_id=olympiad.id,
-                        code=code_str,
-                        is_used=False
-                    )
-                    session.add(code)
+            for code_str in codes:
+                code = OlympiadCode(
+                    session_id=olympiad.id,
+                    class_number=class_num,
+                    code=code_str,
+                    is_assigned=False,
+                    is_issued=False
+                )
+                session.add(code)
 
         created_sessions.append({
             "subject": subject,
@@ -151,78 +147,82 @@ async def upload_codes_csv(
 async def reserve_grade9_for_grade8(session: AsyncSession) -> Dict:
     """
     Автоматическое резервирование кодов 9 класса для 8 классов
-    
+
     Логика:
-    1. Получаем количество учеников 8 класса
-    2. Получаем количество свободных кодов 8 класса
-    3. Если кодов не хватает - берем из 9 класса
+    1. Группируем 8-классников по параллелям
+    2. Для каждой параллели выделяем количество резервных кодов = количеству учеников
+    3. Берем нераспределенные коды 9 класса
     """
     # Получаем активную сессию
     result = await session.execute(
         select(OlympiadSession).where(OlympiadSession.is_active == True)
     )
     active_session = result.scalar_one_or_none()
-    
+
     if not active_session:
         return {"message": "Нет активной сессии", "reserved": 0}
-    
-    # Количество учеников 8 класса
+
+    # Получаем 8-классников по параллелям
     result = await session.execute(
-        select(func.count(Student.id)).where(Student.is_registered == True)
+        select(Student).where(Student.class_number == 8)
     )
-    students_count = result.scalar()
-    
-    # Количество свободных кодов 8 класса
+    grade8_students = result.scalars().all()
+
+    if not grade8_students:
+        return {"message": "Нет учеников 8 класса", "reserved": 0}
+
+    # Группируем по параллелям
+    from collections import defaultdict
+    students_by_parallel = defaultdict(list)
+    for student in grade8_students:
+        parallel = f"8{student.parallel or ''}"
+        students_by_parallel[parallel].append(student)
+
+    # Получаем нераспределенные коды 9 класса
     result = await session.execute(
-        select(func.count(Grade8Code.id)).where(
+        select(OlympiadCode).where(
             and_(
-                Grade8Code.session_id == active_session.id,
-                Grade8Code.student_id == None
+                OlympiadCode.session_id == active_session.id,
+                OlympiadCode.class_number == 9,
+                OlympiadCode.is_assigned == False
             )
         )
-    )
-    available_grade8 = result.scalar()
-    
-    # Нужно зарезервировать
-    needed = max(0, students_count - available_grade8)
-    
-    if needed == 0:
-        return {"message": "Резервирование не требуется", "reserved": 0}
-    
-    # Получаем свободные коды 9 класса
-    result = await session.execute(
-        select(Grade9Code).where(
-            and_(
-                Grade9Code.session_id == active_session.id,
-                Grade9Code.is_used == False
-            )
-        ).limit(needed)
     )
     grade9_codes = result.scalars().all()
-    
-    # Конвертируем коды 9 класса в коды 8 класса
-    reserved_count = 0
-    for grade9_code in grade9_codes:
-        # Создаем новый код для 8 класса
-        new_grade8_code = Grade8Code(
-            student_id=None,
-            session_id=active_session.id,
-            code=grade9_code.code,  # Используем тот же код
-            is_issued=False
-        )
-        session.add(new_grade8_code)
-        
-        # Помечаем код 9 класса как использованный
-        grade9_code.is_used = True
-        
-        reserved_count += 1
-    
+
+    if not grade9_codes:
+        return {"message": "Нет доступных кодов 9 класса", "reserved": 0}
+
+    # Распределяем коды между параллелями
+    code_index = 0
+    total_reserved = 0
+
+    for parallel, students in sorted(students_by_parallel.items()):
+        codes_needed = len(students)
+        codes_allocated = 0
+
+        for i in range(codes_needed):
+            if code_index >= len(grade9_codes):
+                break
+
+            reserve_code = Grade8ReserveCode(
+                session_id=active_session.id,
+                class_parallel=parallel,
+                code=grade9_codes[code_index].code
+            )
+            session.add(reserve_code)
+            code_index += 1
+            codes_allocated += 1
+            total_reserved += 1
+
+        logger.info(f"Для {parallel}: выделено {codes_allocated} резервных кодов")
+
     await session.commit()
-    
+
     return {
-        "message": f"Зарезервировано {reserved_count} кодов из 9 класса для 8 класса",
-        "reserved": reserved_count,
-        "needed": needed
+        "message": f"Зарезервировано {total_reserved} кодов из 9 класса для 8 классов",
+        "reserved": total_reserved,
+        "parallels": len(students_by_parallel)
     }
 
 
@@ -286,42 +286,48 @@ async def activate_session(
 async def get_codes_stats(
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Статистика по кодам"""
-    # Коды 8 класса
-    result = await session.execute(select(func.count(Grade8Code.id)))
-    total_grade8 = result.scalar()
-    
+    """Статистика по кодам для всех классов (5-11)"""
+    # Получаем статистику по каждому классу
     result = await session.execute(
-        select(func.count(Grade8Code.id)).where(Grade8Code.student_id != None)
+        select(
+            OlympiadCode.class_number,
+            func.count(OlympiadCode.id).label('total'),
+            func.sum(func.cast(OlympiadCode.is_assigned, Integer)).label('assigned'),
+            func.sum(func.cast(OlympiadCode.is_issued, Integer)).label('issued')
+        )
+        .group_by(OlympiadCode.class_number)
+        .order_by(OlympiadCode.class_number)
     )
-    assigned_grade8 = result.scalar()
-    
-    result = await session.execute(
-        select(func.count(Grade8Code.id)).where(Grade8Code.is_issued == True)
-    )
-    issued_grade8 = result.scalar()
-    
-    # Коды 9 класса
-    result = await session.execute(select(func.count(Grade9Code.id)))
-    total_grade9 = result.scalar()
-    
-    result = await session.execute(
-        select(func.count(Grade9Code.id)).where(Grade9Code.is_used == True)
-    )
-    used_grade9 = result.scalar()
-    
-    return {
-        "grade8": {
-            "total": total_grade8,
-            "assigned": assigned_grade8,
-            "unassigned": total_grade8 - assigned_grade8,
-            "issued": issued_grade8
-        },
-        "grade9": {
-            "total": total_grade9,
-            "used": used_grade9,
-            "available": total_grade9 - used_grade9
+
+    stats_by_class = {}
+    for row in result.fetchall():
+        class_num, total, assigned, issued = row
+        stats_by_class[f"grade{class_num}"] = {
+            "class": class_num,
+            "total": total or 0,
+            "assigned": assigned or 0,
+            "unassigned": (total or 0) - (assigned or 0),
+            "issued": issued or 0
         }
+
+    # Статистика по резервным кодам для 8 класса
+    result = await session.execute(
+        select(
+            func.count(Grade8ReserveCode.id).label('total'),
+            func.sum(func.cast(Grade8ReserveCode.is_used, Integer)).label('used')
+        )
+    )
+    reserve_row = result.first()
+
+    reserve_stats = {
+        "total": reserve_row.total or 0,
+        "used": reserve_row.used or 0,
+        "available": (reserve_row.total or 0) - (reserve_row.used or 0)
+    }
+
+    return {
+        "by_class": stats_by_class,
+        "grade8_reserve": reserve_stats
     }
 
 
@@ -330,49 +336,74 @@ async def export_session_codes(
     session_id: int,
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Экспорт кодов сессии в CSV"""
+    """Экспорт кодов сессии в CSV (все классы 5-11)"""
     from urllib.parse import quote
-    
+
     # Получаем сессию
     result = await session.execute(
         select(OlympiadSession).where(OlympiadSession.id == session_id)
     )
     olympiad = result.scalar_one_or_none()
-    
+
     if not olympiad:
         raise HTTPException(404, "Сессия не найдена")
-    
-    # Получаем коды 8 класса
+
+    # Получаем коды из универсальной таблицы с загрузкой связанных студентов
+    from sqlalchemy.orm import joinedload
+
     result = await session.execute(
-        select(Grade8Code).where(Grade8Code.session_id == session_id)
+        select(OlympiadCode)
+        .options(joinedload(OlympiadCode.student))
+        .where(OlympiadCode.session_id == session_id)
+        .order_by(OlympiadCode.class_number, OlympiadCode.student_id)
     )
-    codes8 = result.scalars().all()
-    
+    universal_codes = result.scalars().all()
+
     # Создаем CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    writer.writerow([f"Коды - {olympiad.subject} - 8 класс"])
+
+    writer.writerow([f"Коды - {olympiad.subject}"])
     writer.writerow([f"Дата: {olympiad.date.strftime('%d.%m.%Y')}"])
     writer.writerow([])
-    writer.writerow(["№", "ФИО", "Код", "Выдан"])
-    
-    for i, code in enumerate(codes8, 1):
-        student_name = "-"
-        if code.student:
-            student_name = code.student.full_name
-        
-        writer.writerow([
-            i,
-            student_name,
-            code.code,
-            "Да" if code.is_issued else "Нет"
-        ])
-    
+
+    # Группируем коды по классам
+    codes_by_class = {}
+    for code in universal_codes:
+        if code.class_number not in codes_by_class:
+            codes_by_class[code.class_number] = []
+        codes_by_class[code.class_number].append(code)
+
+    # Экспортируем по классам
+    for class_num in sorted(codes_by_class.keys()):
+        codes = codes_by_class[class_num]
+
+        writer.writerow([])
+        writer.writerow([f"=== {class_num} КЛАСС ==="])
+        writer.writerow(["№", "ФИО", "Класс", "Код", "Статус"])
+
+        for i, code in enumerate(codes, 1):
+            student_name = "-"
+            class_display = str(code.class_number)
+
+            if code.student:
+                student_name = code.student.full_name
+                if code.student.class_number and code.student.parallel:
+                    class_display = f"{code.student.class_number}{code.student.parallel}"
+
+            status = "Выдан" if code.is_issued else ("Распределен" if code.is_assigned else "Не распределен")
+
+            writer.writerow([
+                i,
+                student_name,
+                class_display,
+                code.code,
+                status
+            ])
+
     output.seek(0)
-    
+
     # Используем транслитерацию для имени файла
-    # Простая замена русских букв на латинские
     transliteration = {
         'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
         'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
@@ -381,13 +412,13 @@ async def export_session_codes(
         'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
         ' ': '_', '-': '_'
     }
-    
+
     safe_subject = olympiad.subject.lower()
     for ru, en in transliteration.items():
         safe_subject = safe_subject.replace(ru, en)
-    
-    filename = f"{safe_subject}_8klass.csv"
-    
+
+    filename = f"{safe_subject}_all_classes.csv"
+
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv; charset=utf-8",

@@ -591,7 +591,7 @@ async function loadClassesData() {
                                 <td><strong>${c.display}</strong></td>
                                 <td>${c.students_count}</td>
                                 <td>
-                                    <a href="/api/students/export/registration-codes?class_number=${c.class_number}${c.parallel ? '&parallel=' + c.parallel : ''}"
+                                    <a href="/api/students/export/registration-codes?class_number=${c.class_number}${c.parallel ? '&parallel=' + encodeURIComponent(c.parallel) : ''}"
                                        class="btn btn-sm btn-success">
                                         <i class="bi bi-download"></i> Экспорт
                                     </a>
@@ -639,7 +639,7 @@ function exportRegistrationCodes() {
 
     let url = '/api/students/export/registration-codes?';
     if (classNum) url += `class_number=${classNum}&`;
-    if (parallel) url += `parallel=${parallel}&`;
+    if (parallel) url += `parallel=${encodeURIComponent(parallel)}&`;
 
     window.location.href = url;
 }

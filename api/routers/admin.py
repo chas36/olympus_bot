@@ -188,7 +188,6 @@ async def get_student(
         "registration_code": student.registration_code,
         "is_registered": student.is_registered,
         "telegram_id": student.telegram_id,
-        "telegram_username": student.telegram_username,
         "created_at": student.created_at.isoformat(),
         "registered_at": student.registered_at.isoformat() if student.registered_at else None
     }
