@@ -462,6 +462,9 @@ async function loadSessions() {
                                             <i class="bi bi-play"></i> Активировать
                                            </button>`
                                         : '<button class="btn btn-sm btn-secondary" disabled>Активна</button>'}
+                                    <button class="btn btn-sm btn-warning" onclick="distributeSessionCodes(${s.id})">
+                                        <i class="bi bi-arrow-down-up"></i> Распределить
+                                    </button>
                                     <a href="/api/codes/export/session/${s.id}" class="btn btn-sm btn-info">
                                         <i class="bi bi-download"></i> Экспорт
                                     </a>
@@ -483,14 +486,14 @@ async function activateSession(sessionId) {
     if (!confirm('Активировать эту сессию? Текущая активная сессия будет деактивирована.')) {
         return;
     }
-    
+
     try {
         const response = await fetch(`/api/codes/sessions/${sessionId}/activate`, {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             alert('Сессия активирована!');
             loadSessions();
@@ -498,6 +501,36 @@ async function activateSession(sessionId) {
         }
     } catch (error) {
         alert('Ошибка активации: ' + error.message);
+    }
+}
+
+async function distributeSessionCodes(sessionId) {
+    if (!confirm('Распределить коды этой сессии между всеми учениками?\n\nКоды будут распределены по классам и параллелям между ВСЕМИ учениками (не только зарегистрированными).')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/codes/sessions/${sessionId}/distribute`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            let message = `✅ ${result.message}\n\nДетали распределения:\n`;
+            if (result.distribution_log && result.distribution_log.length > 0) {
+                result.distribution_log.forEach(log => {
+                    message += `\n${log.class}: ${log.codes_assigned} кодов из ${log.students} учеников`;
+                });
+            }
+            alert(message);
+            loadSessions();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка распределения: ' + error.message);
     }
 }
 

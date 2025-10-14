@@ -10,7 +10,7 @@ import csv
 import logging
 
 from database.database import get_async_session
-from database.models import OlympiadSession, Grade8Code, Grade9Code, Student, OlympiadCode, Grade8ReserveCode
+from database.models import OlympiadSession, Grade8Code, Grade9Code, Student, OlympiadCode, Grade8ReserveCode, moscow_now
 from parser.csv_parser import parse_codes_csv
 from datetime import datetime
 
@@ -55,7 +55,7 @@ async def upload_codes_csv(
                 subject = subject_data['subject']
                 class_num = subject_data['class_number']
                 codes = subject_data['codes']
-                date = subject_data.get('date') or datetime.now()
+                date = subject_data.get('date') or moscow_now()
 
                 # Группируем по предметам
                 if subject not in subjects_map:
@@ -336,8 +336,11 @@ async def export_session_codes(
     session_id: int,
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Экспорт кодов сессии в CSV (все классы 5-11)"""
+    """Экспорт кодов сессии в виде ZIP-архива с Excel файлами по классам и параллелям"""
     from urllib.parse import quote
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    import zipfile
 
     # Получаем сессию
     result = await session.execute(
@@ -359,49 +362,75 @@ async def export_session_codes(
     )
     universal_codes = result.scalars().all()
 
-    # Создаем CSV
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    writer.writerow([f"Коды - {olympiad.subject}"])
-    writer.writerow([f"Дата: {olympiad.date.strftime('%d.%m.%Y')}"])
-    writer.writerow([])
-
-    # Группируем коды по классам
-    codes_by_class = {}
+    # Группируем коды по классам и параллелям
+    codes_by_class_parallel = {}
     for code in universal_codes:
-        if code.class_number not in codes_by_class:
-            codes_by_class[code.class_number] = []
-        codes_by_class[code.class_number].append(code)
+        class_key = code.class_number
+        if class_key not in codes_by_class_parallel:
+            codes_by_class_parallel[class_key] = {}
 
-    # Экспортируем по классам
-    for class_num in sorted(codes_by_class.keys()):
-        codes = codes_by_class[class_num]
+        # Определяем параллель из студента или пропускаем нераспределенные
+        if code.student and code.student.parallel:
+            parallel = code.student.parallel
 
-        writer.writerow([])
-        writer.writerow([f"=== {class_num} КЛАСС ==="])
-        writer.writerow(["№", "ФИО", "Класс", "Код", "Статус"])
+            if parallel not in codes_by_class_parallel[class_key]:
+                codes_by_class_parallel[class_key][parallel] = []
 
-        for i, code in enumerate(codes, 1):
-            student_name = "-"
-            class_display = str(code.class_number)
+            codes_by_class_parallel[class_key][parallel].append(code)
 
-            if code.student:
-                student_name = code.student.full_name
-                if code.student.class_number and code.student.parallel:
-                    class_display = f"{code.student.class_number}{code.student.parallel}"
+    # Создаём временную директорию для файлов
+    zip_buffer = io.BytesIO()
 
-            status = "Выдан" if code.is_issued else ("Распределен" if code.is_assigned else "Не распределен")
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        # Для каждого класса создаём папку и файлы параллелей
+        for class_num in sorted(codes_by_class_parallel.keys()):
+            parallels = codes_by_class_parallel[class_num]
 
-            writer.writerow([
-                i,
-                student_name,
-                class_display,
-                code.code,
-                status
-            ])
+            for parallel in sorted(parallels.keys()):
+                codes = parallels[parallel]
 
-    output.seek(0)
+                # Создаём Excel файл для этой параллели
+                wb = Workbook()
+                ws = wb.active
+                ws.title = f"{class_num}{parallel}"
+
+                # Заголовок
+                ws['A1'] = f"Коды для {class_num}{parallel} - {olympiad.subject}"
+                ws['A1'].font = Font(bold=True, size=14)
+                ws.merge_cells('A1:B1')
+                ws['A1'].alignment = Alignment(horizontal='center')
+
+                # Заголовки колонок
+                ws['A3'] = "ФИО"
+                ws['B3'] = "Код"
+                ws['A3'].font = Font(bold=True)
+                ws['B3'].font = Font(bold=True)
+                ws['A3'].fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+                ws['B3'].fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+
+                # Данные
+                row = 4
+                for code in codes:
+                    if code.student:
+                        ws[f'A{row}'] = code.student.full_name
+                        ws[f'B{row}'] = code.code
+                        row += 1
+
+                # Ширина колонок
+                ws.column_dimensions['A'].width = 40
+                ws.column_dimensions['B'].width = 30
+
+                # Сохраняем во временный буфер
+                excel_buffer = io.BytesIO()
+                wb.save(excel_buffer)
+                excel_buffer.seek(0)
+
+                # Добавляем в архив
+                folder_name = f"{class_num}_класс"
+                file_name = f"{class_num}{parallel}.xlsx"
+                zip_file.writestr(f"{folder_name}/{file_name}", excel_buffer.getvalue())
+
+    zip_buffer.seek(0)
 
     # Используем транслитерацию для имени файла
     transliteration = {
@@ -417,12 +446,128 @@ async def export_session_codes(
     for ru, en in transliteration.items():
         safe_subject = safe_subject.replace(ru, en)
 
-    filename = f"{safe_subject}_all_classes.csv"
+    date_str = olympiad.date.strftime('%d-%m-%Y')
+    filename = f"{safe_subject}_{date_str}.zip"
 
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv; charset=utf-8",
+        iter([zip_buffer.getvalue()]),
+        media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
+
+
+@router.post("/sessions/{session_id}/distribute")
+async def distribute_codes_to_students(
+    session_id: int,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Распределение кодов сессии между всеми учениками по классам и параллелям
+
+    Логика:
+    1. Берём все нераспределённые коды для каждого класса
+    2. Берём всех учеников этого класса (всех, не только зарегистрированных)
+    3. Распределяем коды по ученикам каждой параллели
+    """
+    from sqlalchemy.orm import joinedload
+
+    # Проверяем существование сессии
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.id == session_id)
+    )
+    olympiad = result.scalar_one_or_none()
+
+    if not olympiad:
+        raise HTTPException(404, "Сессия не найдена")
+
+    # Получаем все нераспределённые коды этой сессии, сгруппированные по классам
+    result = await session.execute(
+        select(OlympiadCode)
+        .where(
+            and_(
+                OlympiadCode.session_id == session_id,
+                OlympiadCode.is_assigned == False,
+                OlympiadCode.student_id.is_(None)
+            )
+        )
+        .order_by(OlympiadCode.class_number, OlympiadCode.id)
+    )
+    available_codes = result.scalars().all()
+
+    if not available_codes:
+        return {
+            "success": True,
+            "message": "Нет доступных кодов для распределения",
+            "distributed": 0
+        }
+
+    # Группируем коды по классам
+    codes_by_class = {}
+    for code in available_codes:
+        if code.class_number not in codes_by_class:
+            codes_by_class[code.class_number] = []
+        codes_by_class[code.class_number].append(code)
+
+    distributed_count = 0
+    distribution_log = []
+
+    # Для каждого класса распределяем коды
+    for class_num, codes in codes_by_class.items():
+        # Получаем всех учеников этого класса, сгруппированных по параллелям
+        result = await session.execute(
+            select(Student)
+            .where(Student.class_number == class_num)
+            .order_by(Student.parallel, Student.full_name)
+        )
+        students = result.scalars().all()
+
+        if not students:
+            logger.warning(f"Нет учеников для класса {class_num}")
+            continue
+
+        # Группируем учеников по параллелям
+        students_by_parallel = {}
+        for student in students:
+            parallel = student.parallel or "Без параллели"
+            if parallel not in students_by_parallel:
+                students_by_parallel[parallel] = []
+            students_by_parallel[parallel].append(student)
+
+        # Распределяем коды по параллелям
+        code_index = 0
+        for parallel, parallel_students in sorted(students_by_parallel.items()):
+            parallel_distributed = 0
+
+            for student in parallel_students:
+                if code_index >= len(codes):
+                    logger.warning(f"Закончились коды для класса {class_num}")
+                    break
+
+                code = codes[code_index]
+                code.student_id = student.id
+                code.is_assigned = True
+                code.assigned_at = moscow_now()
+
+                code_index += 1
+                distributed_count += 1
+                parallel_distributed += 1
+
+            distribution_log.append({
+                "class": f"{class_num}{parallel}",
+                "students": len(parallel_students),
+                "codes_assigned": parallel_distributed
+            })
+
+            if code_index >= len(codes):
+                break
+
+    await session.commit()
+
+    return {
+        "success": True,
+        "message": f"Распределено {distributed_count} кодов",
+        "distributed": distributed_count,
+        "distribution_log": distribution_log
+    }

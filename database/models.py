@@ -1,8 +1,15 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
+
+# Московский часовой пояс (UTC+3)
+MOSCOW_TZ = timezone(timedelta(hours=3))
+
+def moscow_now():
+    """Возвращает текущее время в московском часовом поясе"""
+    return datetime.now(MOSCOW_TZ)
 
 
 class Student(Base):
@@ -16,7 +23,7 @@ class Student(Base):
     is_registered = Column(Boolean, default=False)
     class_number = Column(Integer, nullable=True, index=True)  # Номер класса (4-11)
     parallel = Column(String(10), nullable=True)  # Параллель (А, Б, Т1, Т2, и т.д.)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=moscow_now)
     registered_at = Column(DateTime, nullable=True)
 
     # Relationships
@@ -40,7 +47,7 @@ class OlympiadSession(Base):
     class_number = Column(Integer, nullable=True, index=True)  # Класс (4-11), может быть NULL если коды для разных классов
     date = Column(DateTime, nullable=False, index=True)  # Дата проведения из CSV
     stage = Column(String(50), nullable=True)  # Этап (школьный, муниципальный, и т.д.)
-    upload_time = Column(DateTime, default=datetime.utcnow)
+    upload_time = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=False)  # По умолчанию неактивна
     uploaded_file_name = Column(String(255), nullable=True)
 
@@ -103,7 +110,7 @@ class CodeRequest(Base):
     session_id = Column(Integer, ForeignKey("olympiad_sessions.id"), nullable=False)
     grade = Column(Integer, nullable=False)  # 8 или 9
     code = Column(String(100), nullable=False)  # Копия кода для истории
-    requested_at = Column(DateTime, default=datetime.utcnow)
+    requested_at = Column(DateTime, default=moscow_now)
     screenshot_submitted = Column(Boolean, default=False)
     screenshot_path = Column(String(500), nullable=True)
     screenshot_submitted_at = Column(DateTime, nullable=True)
@@ -123,7 +130,7 @@ class Reminder(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     request_id = Column(Integer, ForeignKey("code_requests.id"), nullable=False)
-    sent_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime, default=moscow_now)
     reminder_type = Column(String(50), default="screenshot")  # Тип напоминания
 
     # Relationships
@@ -162,7 +169,7 @@ class OlympiadCode(Base):
     is_issued = Column(Boolean, default=False)  # Выдан ученику через бота
     issued_at = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=moscow_now)
 
     # Relationships
     session = relationship("OlympiadSession", back_populates="universal_codes")
@@ -193,7 +200,7 @@ class Grade8ReserveCode(Base):
     used_by_student_id = Column(Integer, ForeignKey("students.id", ondelete="SET NULL"), nullable=True)
     used_at = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=moscow_now)
 
     # Relationships
     session = relationship("OlympiadSession", back_populates="grade8_reserve_codes")

@@ -3,7 +3,7 @@ from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from database.models import (
     Student, OlympiadSession, Grade8Code, Grade9Code,
-    CodeRequest, Reminder, OlympiadCode, Grade8ReserveCode
+    CodeRequest, Reminder, OlympiadCode, Grade8ReserveCode, moscow_now
 )
 from typing import Optional, List
 from datetime import datetime
@@ -63,7 +63,7 @@ async def register_student(
     if student:
         student.telegram_id = telegram_id
         student.is_registered = True
-        student.registered_at = datetime.utcnow()
+        student.registered_at = moscow_now()
         await session.commit()
         await session.refresh(student)
     
@@ -359,7 +359,7 @@ async def mark_grade8_code_issued(
     
     if code:
         code.is_issued = True
-        code.issued_at = datetime.utcnow()
+        code.issued_at = moscow_now()
         await session.commit()
 
 
@@ -411,7 +411,7 @@ async def assign_grade9_code(
     if code:
         code.assigned_student_id = student_id
         code.is_used = True
-        code.assigned_at = datetime.utcnow()
+        code.assigned_at = moscow_now()
         await session.commit()
         await session.refresh(code)
     
@@ -487,7 +487,7 @@ async def mark_screenshot_submitted(
     if request:
         request.screenshot_submitted = True
         request.screenshot_path = screenshot_path
-        request.screenshot_submitted_at = datetime.utcnow()
+        request.screenshot_submitted_at = moscow_now()
         await session.commit()
 
 
@@ -612,7 +612,7 @@ async def mark_code_issued(
 
     if code:
         code.is_issued = True
-        code.issued_at = datetime.utcnow()
+        code.issued_at = moscow_now()
         if student_id and not code.student_id:
             code.student_id = student_id
         await session.commit()
@@ -673,7 +673,7 @@ async def mark_reserve_code_used(
     if code:
         code.is_used = True
         code.used_by_student_id = student_id
-        code.used_at = datetime.utcnow()
+        code.used_at = moscow_now()
         await session.commit()
 
 

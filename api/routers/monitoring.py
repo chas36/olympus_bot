@@ -3,8 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from database.database import get_async_session
 from database.models import (
-    Student, OlympiadSession, Grade8Code, Grade9Code, 
-    CodeRequest, Reminder
+    Student, OlympiadSession, Grade8Code, Grade9Code,
+    CodeRequest, Reminder, OlympiadCode
 )
 
 router = APIRouter(prefix="/api/monitoring", tags=["Monitoring"])
@@ -33,19 +33,19 @@ async def get_dashboard_stats(
     
     active_session_data = None
     if active_session:
-        # Статистика по активной сессии
+        # Статистика по активной сессии (используем универсальную таблицу)
         result = await session.execute(
-            select(func.count(Grade8Code.id)).where(
-                Grade8Code.session_id == active_session.id
+            select(func.count(OlympiadCode.id)).where(
+                OlympiadCode.session_id == active_session.id
             )
         )
         total_codes = result.scalar()
-        
+
         result = await session.execute(
-            select(func.count(Grade8Code.id)).where(
+            select(func.count(OlympiadCode.id)).where(
                 and_(
-                    Grade8Code.session_id == active_session.id,
-                    Grade8Code.is_issued == True
+                    OlympiadCode.session_id == active_session.id,
+                    OlympiadCode.is_issued == True
                 )
             )
         )
