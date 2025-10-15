@@ -270,7 +270,7 @@ function displayStudents(students) {
 
     if (students.length === 0) {
         tbody.innerHTML = `
-            <tr><td colspan="6" class="text-center text-muted">Нет учеников</td></tr>
+            <tr><td colspan="7" class="text-center text-muted">Нет учеников</td></tr>
         `;
         document.getElementById('studentsCount').textContent = '';
         return;
@@ -288,6 +288,11 @@ function displayStudents(students) {
                     : '<span class="badge bg-warning">Ожидает</span>'}
             </td>
             <td>${s.telegram_id || '-'}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showEditStudentModal(${s.id})">
+                    <i class="bi bi-pencil"></i>
+                </button>
+            </td>
         </tr>
     `).join('');
 
@@ -1446,3 +1451,147 @@ async function disableAllStudentsNotifications() {
 document.addEventListener('DOMContentLoaded', function() {
     loadGlobalNotificationStatus();
 });
+
+// ==================== УПРАВЛЕНИЕ УЧЕНИКАМИ ====================
+
+function showAddStudentModal() {
+    // Очищаем форму
+    document.getElementById('addStudentName').value = '';
+    document.getElementById('addStudentClass').value = '';
+    document.getElementById('addStudentParallel').value = '';
+
+    // Показываем модальное окно
+    const modal = new bootstrap.Modal(document.getElementById('addStudentModal'));
+    modal.show();
+}
+
+async function createStudent() {
+    const fullName = document.getElementById('addStudentName').value.trim();
+    const classNumber = document.getElementById('addStudentClass').value;
+    const parallel = document.getElementById('addStudentParallel').value.trim();
+
+    if (!fullName) {
+        alert('Введите ФИО ученика');
+        return;
+    }
+
+    const data = {
+        full_name: fullName
+    };
+
+    if (classNumber) {
+        data.class_number = parseInt(classNumber);
+    }
+
+    if (parallel) {
+        data.parallel = parallel;
+    }
+
+    try {
+        const response = await fetch('/api/students/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            alert(`✅ Ученик создан!\n\nИмя: ${result.student.full_name}\nКод: ${result.student.registration_code}\nКласс: ${result.student.class_display || 'Не указан'}`);
+
+            // Закрываем модальное окно
+            bootstrap.Modal.getInstance(document.getElementById('addStudentModal')).hide();
+
+            // Перезагружаем список учеников
+            loadStudentsList();
+            loadStudentsStats();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.detail || result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка создания ученика: ' + error.message);
+    }
+}
+
+async function showEditStudentModal(studentId) {
+    try {
+        // Загружаем данные ученика
+        const response = await fetch(`/api/students/${studentId}`);
+        const student = await response.json();
+
+        if (!response.ok) {
+            throw new Error(student.detail || 'Ученик не найден');
+        }
+
+        // Заполняем форму
+        document.getElementById('editStudentId').value = student.id;
+        document.getElementById('editStudentName').value = student.full_name;
+        document.getElementById('editStudentClass').value = student.class_number || '';
+        document.getElementById('editStudentParallel').value = student.parallel || '';
+
+        // Показываем модальное окно
+        const modal = new bootstrap.Modal(document.getElementById('editStudentModal'));
+        modal.show();
+    } catch (error) {
+        alert('❌ Ошибка загрузки данных ученика: ' + error.message);
+    }
+}
+
+async function updateStudent() {
+    const studentId = document.getElementById('editStudentId').value;
+    const fullName = document.getElementById('editStudentName').value.trim();
+    const classNumber = document.getElementById('editStudentClass').value;
+    const parallel = document.getElementById('editStudentParallel').value.trim();
+
+    if (!fullName) {
+        alert('Введите ФИО ученика');
+        return;
+    }
+
+    const data = {
+        full_name: fullName
+    };
+
+    if (classNumber) {
+        data.class_number = parseInt(classNumber);
+    } else {
+        data.class_number = null;
+    }
+
+    if (parallel) {
+        data.parallel = parallel;
+    } else {
+        data.parallel = null;
+    }
+
+    try {
+        const response = await fetch(`/api/students/${studentId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            alert(`✅ ${result.message}\n\nИмя: ${result.student.full_name}\nКласс: ${result.student.class_display || 'Не указан'}`);
+
+            // Закрываем модальное окно
+            bootstrap.Modal.getInstance(document.getElementById('editStudentModal')).hide();
+
+            // Перезагружаем список учеников
+            loadStudentsList();
+            loadStudentsStats();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.detail || result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка обновления ученика: ' + error.message);
+    }
+}

@@ -138,10 +138,13 @@
                                         <p class="mb-0 small">Excel файл (ФИО, Класс)</p>
                                     </div>
                                     <input type="file" id="studentsFileInput" accept=".xlsx,.xls" style="display:none">
-                                    <button type="button" class="btn btn-success btn-sm w-100" onclick="uploadStudents()">
+                                    <button type="button" class="btn btn-success btn-sm w-100 mb-2" onclick="uploadStudents()">
                                         <i class="bi bi-upload"></i> Загрузить
                                     </button>
                                 </form>
+                                <button type="button" class="btn btn-primary btn-sm w-100" onclick="showAddStudentModal()">
+                                    <i class="bi bi-person-plus"></i> Добавить ученика
+                                </button>
                                 <div id="uploadStudentsResult" class="mt-2"></div>
                             </div>
                         </div>
@@ -203,6 +206,7 @@
                                         <th>Код регистрации</th>
                                         <th>Статус</th>
                                         <th>Telegram ID</th>
+                                        <th>Действия</th>
                                     </tr>
                                 </thead>
                                 <tbody></tbody>
@@ -542,6 +546,82 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно добавления ученика -->
+    <div class="modal fade" id="addStudentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-person-plus"></i> Добавить ученика</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addStudentForm">
+                        <div class="mb-3">
+                            <label class="form-label">ФИО <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="addStudentName" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Класс</label>
+                                <input type="number" class="form-control" id="addStudentClass" min="1" max="11" placeholder="Например: 8">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Параллель</label>
+                                <input type="text" class="form-control" id="addStudentParallel" maxlength="10" placeholder="Например: А">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" onclick="createStudent()">
+                        <i class="bi bi-check"></i> Создать
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно редактирования ученика -->
+    <div class="modal fade" id="editStudentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-pencil"></i> Редактировать ученика</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editStudentId">
+                    <form id="editStudentForm">
+                        <div class="mb-3">
+                            <label class="form-label">ФИО <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="editStudentName" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Класс</label>
+                                <input type="number" class="form-control" id="editStudentClass" min="1" max="11">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Параллель</label>
+                                <input type="text" class="form-control" id="editStudentParallel" maxlength="10">
+                            </div>
+                        </div>
+                        <div class="alert alert-info">
+                            <small><i class="bi bi-info-circle"></i> Изменение класса переведет ученика в другой класс</small>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" onclick="updateStudent()">
+                        <i class="bi bi-check"></i> Сохранить
+                    </button>
                 </div>
             </div>
         </div>

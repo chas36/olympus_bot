@@ -189,7 +189,24 @@ async def reserve_grade9_for_grade8(session: AsyncSession, session_id: int = Non
         parallel = f"8{student.parallel or ''}"
         students_by_parallel[parallel].append(student)
 
-    # Получаем нераспределенные коды 9 класса
+    # Считаем сколько учеников 9 класса
+    result = await session.execute(
+        select(func.count(Student.id)).where(Student.class_number == 9)
+    )
+    grade9_students_count = result.scalar()
+
+    # Получаем ВСЕ коды 9 класса для этой сессии
+    result = await session.execute(
+        select(OlympiadCode).where(
+            and_(
+                OlympiadCode.session_id == active_session.id,
+                OlympiadCode.class_number == 9
+            )
+        )
+    )
+    all_grade9_codes = result.scalars().all()
+
+    # Получаем только нераспределенные коды 9 класса
     result = await session.execute(
         select(OlympiadCode).where(
             and_(
@@ -204,26 +221,25 @@ async def reserve_grade9_for_grade8(session: AsyncSession, session_id: int = Non
     if not grade9_codes:
         return {"message": "Нет доступных кодов 9 класса", "reserved": 0}
 
-    # Считаем сколько учеников 9 класса
-    result = await session.execute(
-        select(func.count(Student.id)).where(Student.class_number == 9)
-    )
-    grade9_students_count = result.scalar()
-
-    # Реальный резерв = нераспределенные коды минус количество учеников 9 класса
-    # (т.к. эти коды должны быть зарезервированы для самих 9-классников)
-    actual_surplus = len(grade9_codes) - grade9_students_count
+    # Реальный резерв = ВСЕГО кодов минус количество учеников 9 класса
+    # Избыточные коды можно использовать для резерва 8 класса
+    total_grade9_codes = len(all_grade9_codes)
+    actual_surplus = total_grade9_codes - grade9_students_count
 
     if actual_surplus <= 0:
         return {
-            "message": f"Нет избыточных кодов 9 класса (всего кодов: {len(grade9_codes)}, учеников: {grade9_students_count})",
+            "message": f"Нет избыточных кодов 9 класса (всего кодов: {total_grade9_codes}, учеников: {grade9_students_count})",
             "reserved": 0
         }
 
-    logger.info(f"Всего кодов 9 класса: {len(grade9_codes)}, учеников 9 класса: {grade9_students_count}, избыток: {actual_surplus}")
+    # Берём только нераспределённые коды, но не больше чем избыток
+    # (т.е. если избыток 143, а нераспределённых 143 - берём все 143)
+    codes_to_reserve_count = min(len(grade9_codes), actual_surplus)
 
-    # Берем только избыточные коды для резервирования
-    grade9_codes_for_reserve = grade9_codes[:actual_surplus]
+    logger.info(f"Всего кодов 9 класса: {total_grade9_codes}, учеников 9 класса: {grade9_students_count}, избыток: {actual_surplus}, нераспределённых: {len(grade9_codes)}, будет зарезервировано: {codes_to_reserve_count}")
+
+    # Берем коды для резервирования
+    grade9_codes_for_reserve = grade9_codes[:codes_to_reserve_count]
 
     # Распределяем коды пропорционально численности параллелей
     total_students = sum(len(students) for students in students_by_parallel.values())
