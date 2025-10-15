@@ -8,8 +8,9 @@ Base = declarative_base()
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
 def moscow_now():
-    """Возвращает текущее время в московском часовом поясе"""
-    return datetime.now(MOSCOW_TZ)
+    """Возвращает текущее время в московском часовом поясе (naive datetime для совместимости с БД)"""
+    # Возвращаем naive datetime в московском времени
+    return datetime.now(MOSCOW_TZ).replace(tzinfo=None)
 
 
 class Student(Base):
@@ -23,6 +24,7 @@ class Student(Base):
     is_registered = Column(Boolean, default=False)
     class_number = Column(Integer, nullable=True, index=True)  # Номер класса (4-11)
     parallel = Column(String(10), nullable=True)  # Параллель (А, Б, Т1, Т2, и т.д.)
+    notifications_enabled = Column(Boolean, default=True)  # Включены ли уведомления для ученика
     created_at = Column(DateTime, default=moscow_now)
     registered_at = Column(DateTime, nullable=True)
 
@@ -208,3 +210,15 @@ class Grade8ReserveCode(Base):
 
     def __repr__(self):
         return f"<Grade8ReserveCode(id={self.id}, class={self.class_parallel}, code='{self.code}', used={self.is_used})>"
+
+
+class NotificationSettings(Base):
+    """Глобальные настройки уведомлений системы"""
+    __tablename__ = "notification_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    notifications_enabled = Column(Boolean, default=True)  # Глобальное включение/выключение уведомлений
+    updated_at = Column(DateTime, default=moscow_now, onupdate=moscow_now)
+
+    def __repr__(self):
+        return f"<NotificationSettings(id={self.id}, enabled={self.notifications_enabled})>"

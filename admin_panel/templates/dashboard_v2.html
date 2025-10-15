@@ -128,26 +128,25 @@
             <!-- УЧЕНИКИ -->
             <div class="tab-pane fade" id="students-tab">
                 <div class="row mb-3">
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="card">
-                            <div class="card-body">
-                                <h5 class="card-title"><i class="bi bi-cloud-upload"></i> Загрузить учеников</h5>
+                            <div class="card-body py-2">
+                                <h6 class="card-title mb-2"><i class="bi bi-cloud-upload"></i> Загрузить учеников</h6>
                                 <form id="uploadStudentsForm">
-                                    <div class="file-upload-zone mb-3" onclick="document.getElementById('studentsFileInput').click()">
-                                        <i class="bi bi-file-earmark-excel fs-1 text-success"></i>
-                                        <p class="mb-0">Выберите Excel файл</p>
-                                        <small class="text-muted">Формат: ФИО, Класс</small>
+                                    <div class="file-upload-zone mb-2" style="padding: 1rem;" onclick="document.getElementById('studentsFileInput').click()">
+                                        <i class="bi bi-file-earmark-excel fs-4 text-success"></i>
+                                        <p class="mb-0 small">Excel файл (ФИО, Класс)</p>
                                     </div>
                                     <input type="file" id="studentsFileInput" accept=".xlsx,.xls" style="display:none">
-                                    <button type="button" class="btn btn-success w-100" onclick="uploadStudents()">
+                                    <button type="button" class="btn btn-success btn-sm w-100" onclick="uploadStudents()">
                                         <i class="bi bi-upload"></i> Загрузить
                                     </button>
                                 </form>
-                                <div id="uploadStudentsResult" class="mt-3"></div>
+                                <div id="uploadStudentsResult" class="mt-2"></div>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-8">
                         <div class="card">
                             <div class="card-body">
                                 <h5 class="card-title"><i class="bi bi-info-circle"></i> Статистика учеников</h5>
@@ -164,12 +163,43 @@
                         <h5 class="mb-0"><i class="bi bi-list"></i> Список учеников</h5>
                     </div>
                     <div class="card-body">
+                        <!-- Фильтры -->
+                        <div class="row mb-3">
+                            <div class="col-md-3">
+                                <label class="form-label small">Класс:</label>
+                                <select class="form-select form-select-sm" id="filterClass" onchange="filterStudents()">
+                                    <option value="">Все классы</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Параллель:</label>
+                                <select class="form-select form-select-sm" id="filterParallel" onchange="filterStudents()">
+                                    <option value="">Все параллели</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Статус:</label>
+                                <select class="form-select form-select-sm" id="filterStatus" onchange="filterStudents()">
+                                    <option value="">Все</option>
+                                    <option value="registered">Зарегистрирован</option>
+                                    <option value="not_registered">Не зарегистрирован</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">&nbsp;</label>
+                                <button class="btn btn-sm btn-secondary w-100" onclick="resetFilters()">
+                                    <i class="bi bi-arrow-clockwise"></i> Сбросить
+                                </button>
+                            </div>
+                        </div>
+
                         <div class="table-responsive">
-                            <table class="table table-hover" id="studentsTable">
+                            <table class="table table-hover table-sm" id="studentsTable">
                                 <thead class="table-light">
                                     <tr>
                                         <th>ID</th>
                                         <th>ФИО</th>
+                                        <th>Класс</th>
                                         <th>Код регистрации</th>
                                         <th>Статус</th>
                                         <th>Telegram ID</th>
@@ -178,6 +208,7 @@
                                 <tbody></tbody>
                             </table>
                         </div>
+                        <div id="studentsCount" class="text-muted small mt-2"></div>
                     </div>
                 </div>
             </div>
@@ -294,14 +325,48 @@
 
             <!-- МОНИТОРИНГ -->
             <div class="tab-pane fade" id="monitoring-tab">
+                <!-- Текущая активная олимпиада -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card border-primary">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0"><i class="bi bi-activity"></i> Текущая олимпиада - Участники</h5>
+                            </div>
+                            <div class="card-body" id="activeOlympiadParticipants">
+                                <!-- Загружается динамически -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Список всех олимпиад -->
                 <div class="row">
                     <div class="col-12">
                         <div class="card">
-                            <div class="card-header bg-warning">
-                                <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Ученики без кодов</h5>
+                            <div class="card-header bg-info text-white">
+                                <h5 class="mb-0"><i class="bi bi-list-ul"></i> Все олимпиады</h5>
                             </div>
-                            <div class="card-body" id="studentsWithoutCodes">
-                                <!-- Загружается динамически -->
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-hover" id="allOlympiadsTable">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>Предмет</th>
+                                                <th>Дата</th>
+                                                <th>Этап</th>
+                                                <th>Класс</th>
+                                                <th>Статус</th>
+                                                <th>Коды</th>
+                                                <th>Участники</th>
+                                                <th>Скриншоты</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <!-- Загружается динамически -->
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -383,6 +448,67 @@
                                 </button>
                                 <button class="btn btn-danger w-100" onclick="deleteOlympiad()">
                                     <i class="bi bi-trash"></i> Удалить олимпиаду
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Управление уведомлениями -->
+                <div class="row mt-4">
+                    <div class="col-md-6 mb-3">
+                        <div class="card">
+                            <div class="card-header bg-info text-white">
+                                <h5 class="mb-0"><i class="bi bi-bell"></i> Глобальные уведомления</h5>
+                            </div>
+                            <div class="card-body">
+                                <p class="mb-3">Управление уведомлениями для всей системы</p>
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="globalNotificationsSwitch" checked>
+                                        <label class="form-check-label" for="globalNotificationsSwitch">
+                                            <strong>Уведомления включены</strong>
+                                        </label>
+                                    </div>
+                                    <small class="text-muted">Когда отключено, все уведомления администратору будут приостановлены</small>
+                                </div>
+                                <button class="btn btn-success w-100 mb-2" onclick="enableGlobalNotifications()">
+                                    <i class="bi bi-bell-fill"></i> Включить все уведомления
+                                </button>
+                                <button class="btn btn-warning w-100" onclick="disableGlobalNotifications()">
+                                    <i class="bi bi-bell-slash"></i> Отключить все уведомления
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <div class="card">
+                            <div class="card-header bg-secondary text-white">
+                                <h5 class="mb-0"><i class="bi bi-person-badge"></i> Уведомления учеников</h5>
+                            </div>
+                            <div class="card-body">
+                                <p class="mb-3">Управление уведомлениями для отдельных учеников</p>
+                                <div class="mb-3">
+                                    <label class="form-label">ID ученика:</label>
+                                    <input type="number" class="form-control" id="studentNotificationId" placeholder="Введите ID ученика">
+                                </div>
+                                <div id="studentNotificationInfo" class="mb-3"></div>
+                                <button class="btn btn-primary w-100 mb-2" onclick="checkStudentNotifications()">
+                                    <i class="bi bi-search"></i> Проверить статус
+                                </button>
+                                <button class="btn btn-success w-100 mb-2" onclick="enableStudentNotifications()">
+                                    <i class="bi bi-bell-fill"></i> Включить уведомления
+                                </button>
+                                <button class="btn btn-warning w-100 mb-2" onclick="disableStudentNotifications()">
+                                    <i class="bi bi-bell-slash"></i> Отключить уведомления
+                                </button>
+                                <hr>
+                                <button class="btn btn-outline-success w-100 mb-2" onclick="enableAllStudentsNotifications()">
+                                    <i class="bi bi-people-fill"></i> Включить для ВСЕХ учеников
+                                </button>
+                                <button class="btn btn-outline-warning w-100" onclick="disableAllStudentsNotifications()">
+                                    <i class="bi bi-people-fill"></i> Отключить для ВСЕХ учеников
                                 </button>
                             </div>
                         </div>

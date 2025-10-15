@@ -8,6 +8,10 @@ function updateTime() {
 setInterval(updateTime, 1000);
 updateTime();
 
+// Глобальные переменные
+let allStudents = [];
+let filteredStudents = [];
+
 // Загрузка при старте
 document.addEventListener('DOMContentLoaded', function() {
     loadDashboard();
@@ -15,7 +19,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadCodesStats();
     loadSessions();
     loadRecentActivity();
-    
+
     // Автообновление каждые 30 секунд
     setInterval(() => {
         loadDashboard();
@@ -152,15 +156,23 @@ async function loadStudentsStats() {
         const response = await fetch('/api/students/stats');
         const data = await response.json();
 
+        // Процент регистрации
+        const registrationPercent = data.total > 0
+            ? Math.round((data.registered / data.total) * 100)
+            : 0;
+
         // Строим статистику по классам
         let byClassHTML = '';
         if (data.by_class && Object.keys(data.by_class).length > 0) {
-            byClassHTML = '<hr><h6>По классам:</h6><div class="row">';
+            byClassHTML = '<hr><h6 class="mb-2">По классам:</h6>';
+            byClassHTML += '<div class="row">';
             Object.entries(data.by_class).forEach(([classNum, count]) => {
                 byClassHTML += `
-                    <div class="col-6 mb-2">
-                        <small class="text-muted">${classNum} класс:</small>
-                        <strong>${count}</strong>
+                    <div class="col-4 mb-2">
+                        <div class="d-flex justify-content-between">
+                            <span class="small">${classNum}:</span>
+                            <strong class="small">${count}</strong>
+                        </div>
                     </div>
                 `;
             });
@@ -168,23 +180,29 @@ async function loadStudentsStats() {
         }
 
         const statsHTML = `
-            <div class="row text-center">
+            <div class="row text-center mb-3">
                 <div class="col-4">
-                    <h2>${data.total}</h2>
+                    <h2 class="mb-1">${data.total}</h2>
                     <small class="text-muted">Всего</small>
                 </div>
                 <div class="col-4">
-                    <h2 class="text-success">${data.registered}</h2>
+                    <h2 class="text-success mb-1">${data.registered}</h2>
                     <small class="text-muted">Зарегистрировано</small>
                 </div>
                 <div class="col-4">
-                    <h2 class="text-warning">${data.not_registered}</h2>
+                    <h2 class="text-warning mb-1">${data.not_registered}</h2>
                     <small class="text-muted">Ожидают</small>
                 </div>
             </div>
+            <div class="progress mb-2" style="height: 20px;">
+                <div class="progress-bar bg-success" style="width: ${registrationPercent}%">
+                    ${registrationPercent}%
+                </div>
+            </div>
+            <p class="text-center text-muted small mb-0">Процент регистрации</p>
             ${byClassHTML}
             <hr>
-            <button class="btn btn-primary w-100" onclick="loadStudentsList()">
+            <button class="btn btn-primary btn-sm w-100" onclick="loadStudentsList()">
                 <i class="bi bi-list"></i> Показать список
             </button>
         `;
@@ -197,39 +215,121 @@ async function loadStudentsStats() {
 
 async function loadStudentsList() {
     try {
-        const response = await fetch('/api/students/');
-        const students = await response.json();
-        
-        const tbody = document.querySelector('#studentsTable tbody');
-        
-        if (students.length === 0) {
-            tbody.innerHTML = `
-                <tr><td colspan="5" class="text-center text-muted">Нет учеников</td></tr>
-            `;
-            return;
-        }
-        
-        const rows = students.map(s => `
-            <tr>
-                <td>${s.id}</td>
-                <td>
-                    ${s.full_name}
-                    ${s.class_display ? `<br><small class="text-muted">${s.class_display}</small>` : ''}
-                </td>
-                <td><code>${s.registration_code}</code></td>
-                <td>
-                    ${s.is_registered
-                        ? '<span class="badge bg-success">Зарегистрирован</span>'
-                        : '<span class="badge bg-warning">Ожидает</span>'}
-                </td>
-                <td>${s.telegram_id || '-'}</td>
-            </tr>
-        `).join('');
-        
-        tbody.innerHTML = rows;
+        // Загружаем всех учеников, включая не зарегистрированных
+        const response = await fetch('/api/students/?include_inactive=true');
+        allStudents = await response.json();
+
+        // Заполняем фильтры
+        populateStudentsFilters();
+
+        // Показываем учеников
+        filteredStudents = allStudents;
+        displayStudents(filteredStudents);
     } catch (error) {
         console.error('Ошибка загрузки списка учеников:', error);
     }
+}
+
+function populateStudentsFilters() {
+    // Собираем уникальные классы и параллели
+    const classes = new Set();
+    const parallels = new Set();
+
+    allStudents.forEach(s => {
+        if (s.class_number) {
+            classes.add(s.class_number);
+            if (s.parallel) {
+                parallels.add(s.parallel);
+            }
+        }
+    });
+
+    // Заполняем селект классов
+    const classSelect = document.getElementById('filterClass');
+    classSelect.innerHTML = '<option value="">Все классы</option>';
+    [...classes].sort((a, b) => a - b).forEach(c => {
+        const option = document.createElement('option');
+        option.value = c;
+        option.textContent = `${c} класс`;
+        classSelect.appendChild(option);
+    });
+
+    // Заполняем селект параллелей
+    const parallelSelect = document.getElementById('filterParallel');
+    parallelSelect.innerHTML = '<option value="">Все параллели</option>';
+    [...parallels].sort().forEach(p => {
+        const option = document.createElement('option');
+        option.value = p;
+        option.textContent = p;
+        parallelSelect.appendChild(option);
+    });
+}
+
+function displayStudents(students) {
+    const tbody = document.querySelector('#studentsTable tbody');
+
+    if (students.length === 0) {
+        tbody.innerHTML = `
+            <tr><td colspan="6" class="text-center text-muted">Нет учеников</td></tr>
+        `;
+        document.getElementById('studentsCount').textContent = '';
+        return;
+    }
+
+    const rows = students.map(s => `
+        <tr>
+            <td>${s.id}</td>
+            <td>${s.full_name}</td>
+            <td>${s.class_display || '-'}</td>
+            <td><code class="small">${s.registration_code}</code></td>
+            <td>
+                ${s.is_registered
+                    ? '<span class="badge bg-success">Зарегистрирован</span>'
+                    : '<span class="badge bg-warning">Ожидает</span>'}
+            </td>
+            <td>${s.telegram_id || '-'}</td>
+        </tr>
+    `).join('');
+
+    tbody.innerHTML = rows;
+    document.getElementById('studentsCount').textContent = `Показано: ${students.length} из ${allStudents.length}`;
+}
+
+function filterStudents() {
+    const classFilter = document.getElementById('filterClass').value;
+    const parallelFilter = document.getElementById('filterParallel').value;
+    const statusFilter = document.getElementById('filterStatus').value;
+
+    filteredStudents = allStudents.filter(s => {
+        // Фильтр по классу
+        if (classFilter && s.class_number != classFilter) {
+            return false;
+        }
+
+        // Фильтр по параллели
+        if (parallelFilter && s.parallel !== parallelFilter) {
+            return false;
+        }
+
+        // Фильтр по статусу
+        if (statusFilter === 'registered' && !s.is_registered) {
+            return false;
+        }
+        if (statusFilter === 'not_registered' && s.is_registered) {
+            return false;
+        }
+
+        return true;
+    });
+
+    displayStudents(filteredStudents);
+}
+
+function resetFilters() {
+    document.getElementById('filterClass').value = '';
+    document.getElementById('filterParallel').value = '';
+    document.getElementById('filterStatus').value = '';
+    filterStudents();
 }
 
 async function uploadStudents() {
@@ -536,43 +636,145 @@ async function distributeSessionCodes(sessionId) {
 
 // ==================== МОНИТОРИНГ ====================
 
-async function loadStudentsWithoutCodes() {
+async function loadAllOlympiads() {
     try {
-        const response = await fetch('/api/monitoring/students-without-codes');
+        const response = await fetch('/api/monitoring/all-sessions');
         const data = await response.json();
-        
-        if (data.students.length === 0) {
-            document.getElementById('studentsWithoutCodes').innerHTML = `
-                <div class="alert alert-success mb-0">
-                    <i class="bi bi-check-circle"></i> Все ученики получили коды!
+
+        const tbody = document.querySelector('#allOlympiadsTable tbody');
+
+        if (data.sessions.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="9" class="text-center text-muted">Нет олимпиад</td></tr>
+            `;
+            return;
+        }
+
+        const rows = data.sessions.map(s => {
+            const date = new Date(s.date);
+            const dateStr = isNaN(date.getTime()) ? 'Дата не указана' : date.toLocaleDateString('ru-RU');
+
+            return `
+                <tr>
+                    <td>${s.id}</td>
+                    <td><strong>${s.subject}</strong></td>
+                    <td>${dateStr}</td>
+                    <td>${s.stage || '-'}</td>
+                    <td>${s.class_number || '-'}</td>
+                    <td>
+                        ${s.is_active
+                            ? '<span class="badge bg-success">Активна</span>'
+                            : '<span class="badge bg-secondary">Неактивна</span>'}
+                    </td>
+                    <td>
+                        <span class="badge bg-info">${s.issued_codes}/${s.total_codes}</span>
+                    </td>
+                    <td>
+                        <span class="badge bg-primary">${s.code_requests}</span>
+                    </td>
+                    <td>
+                        <span class="badge bg-success">${s.screenshots}</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.innerHTML = rows;
+    } catch (error) {
+        console.error('Ошибка загрузки всех олимпиад:', error);
+    }
+}
+
+async function loadActiveOlympiadParticipants() {
+    try {
+        const response = await fetch('/api/monitoring/active-session/participants');
+        const data = await response.json();
+
+        const container = document.getElementById('activeOlympiadParticipants');
+
+        if (!data.session) {
+            container.innerHTML = `
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> Нет активной олимпиады
                 </div>
             `;
             return;
         }
-        
-        const html = `
-            <p><strong>Олимпиада:</strong> ${data.session}</p>
-            <p><strong>Учеников без кодов:</strong> ${data.count}</p>
+
+        const sessionDate = new Date(data.session.date);
+        const sessionDateStr = isNaN(sessionDate.getTime()) ? 'Дата не указана' : sessionDate.toLocaleDateString('ru-RU');
+
+        let html = `
+            <h4>${data.session.subject}</h4>
+            <p class="text-muted">
+                ${sessionDateStr}
+                ${data.session.stage ? `• ${data.session.stage}` : ''}
+            </p>
             <hr>
-            <div class="list-group">
-                ${data.students.map(s => `
-                    <div class="list-group-item">
-                        <i class="bi bi-person"></i> ${s.full_name}
-                        ${s.telegram_id ? '<span class="badge bg-info ms-2">В боте</span>' : ''}
-                    </div>
-                `).join('')}
-            </div>
+            <p><strong>Участников:</strong> ${data.total_participants}</p>
         `;
-        
-        document.getElementById('studentsWithoutCodes').innerHTML = html;
+
+        if (data.participants.length === 0) {
+            html += `
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Пока нет участников
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>ФИО</th>
+                                <th>Класс</th>
+                                <th>Время запроса</th>
+                                <th>Код</th>
+                                <th>Скриншот</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.participants.map(p => {
+                                const requestedAt = new Date(p.requested_at);
+                                const requestedTimeStr = requestedAt.toLocaleTimeString('ru-RU');
+
+                                return `
+                                    <tr>
+                                        <td>${p.full_name}</td>
+                                        <td>${p.class_display}</td>
+                                        <td><small>${requestedTimeStr}</small></td>
+                                        <td><code class="small">${p.code}</code></td>
+                                        <td>
+                                            ${p.screenshot_submitted
+                                                ? '<span class="badge bg-success"><i class="bi bi-check"></i> Да</span>'
+                                                : '<span class="badge bg-warning"><i class="bi bi-clock"></i> Нет</span>'}
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
     } catch (error) {
-        console.error('Ошибка загрузки учеников без кодов:', error);
+        console.error('Ошибка загрузки участников:', error);
     }
 }
 
 // Загружаем при переключении на таб мониторинга
 document.querySelector('button[data-bs-target="#monitoring-tab"]').addEventListener('click', () => {
-    loadStudentsWithoutCodes();
+    loadAllOlympiads();
+    loadActiveOlympiadParticipants();
+});
+
+// Загружаем при переключении на таб учеников
+document.querySelector('button[data-bs-target="#students-tab"]').addEventListener('click', () => {
+    if (allStudents.length === 0) {
+        loadStudentsList();
+    }
 });
 
 // ==================== РЕГИСТРАЦИЯ ====================
@@ -1031,3 +1233,216 @@ async function deleteOlympiad() {
         alert('❌ Ошибка удаления: ' + error.message);
     }
 }
+
+// ==================== УВЕДОМЛЕНИЯ ====================
+
+// Загрузка статуса глобальных уведомлений
+async function loadGlobalNotificationStatus() {
+    try {
+        const response = await fetch('/api/notifications/global');
+        const data = await response.json();
+
+        const switchElement = document.getElementById('globalNotificationsSwitch');
+        if (switchElement) {
+            switchElement.checked = data.notifications_enabled;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки статуса уведомлений:', error);
+    }
+}
+
+// Включить глобальные уведомления
+async function enableGlobalNotifications() {
+    try {
+        const response = await fetch('/api/notifications/global', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ notifications_enabled: true })
+        });
+
+        const result = await response.json();
+
+        if (result.notifications_enabled) {
+            alert('✅ Глобальные уведомления включены');
+            loadGlobalNotificationStatus();
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Отключить глобальные уведомления
+async function disableGlobalNotifications() {
+    if (!confirm('⚠️ Вы уверены? Все уведомления администратору будут отключены.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notifications/global', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ notifications_enabled: false })
+        });
+
+        const result = await response.json();
+
+        if (!result.notifications_enabled) {
+            alert('✅ Глобальные уведомления отключены');
+            loadGlobalNotificationStatus();
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Проверить статус уведомлений ученика
+async function checkStudentNotifications() {
+    const studentId = document.getElementById('studentNotificationId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/notifications/student/${studentId}`);
+
+        if (!response.ok) {
+            throw new Error('Ученик не найден');
+        }
+
+        const data = await response.json();
+
+        const statusHtml = `
+            <div class="alert ${data.notifications_enabled ? 'alert-success' : 'alert-warning'}">
+                <strong>Ученик:</strong> ${data.full_name}<br>
+                <strong>Статус уведомлений:</strong>
+                ${data.notifications_enabled
+                    ? '<span class="badge bg-success">Включены</span>'
+                    : '<span class="badge bg-warning">Отключены</span>'}
+            </div>
+        `;
+
+        document.getElementById('studentNotificationInfo').innerHTML = statusHtml;
+    } catch (error) {
+        document.getElementById('studentNotificationInfo').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> ${error.message}
+            </div>
+        `;
+    }
+}
+
+// Включить уведомления для ученика
+async function enableStudentNotifications() {
+    const studentId = document.getElementById('studentNotificationId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/notifications/student/${studentId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                student_id: parseInt(studentId),
+                notifications_enabled: true
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Ученик не найден');
+        }
+
+        const result = await response.json();
+        alert('✅ ' + result.message);
+        checkStudentNotifications();
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Отключить уведомления для ученика
+async function disableStudentNotifications() {
+    const studentId = document.getElementById('studentNotificationId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/notifications/student/${studentId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                student_id: parseInt(studentId),
+                notifications_enabled: false
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Ученик не найден');
+        }
+
+        const result = await response.json();
+        alert('✅ ' + result.message);
+        checkStudentNotifications();
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Включить уведомления для ВСЕХ учеников
+async function enableAllStudentsNotifications() {
+    if (!confirm('Включить уведомления для ВСЕХ учеников?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notifications/students/all?notifications_enabled=true', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        alert(`✅ ${result.message}`);
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Отключить уведомления для ВСЕХ учеников
+async function disableAllStudentsNotifications() {
+    if (!confirm('⚠️ Вы уверены?\nЭто отключит уведомления для ВСЕХ учеников в системе!')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notifications/students/all?notifications_enabled=false', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        alert(`✅ ${result.message}`);
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Загружаем статус уведомлений при инициализации
+document.addEventListener('DOMContentLoaded', function() {
+    loadGlobalNotificationStatus();
+});

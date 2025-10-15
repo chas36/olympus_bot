@@ -1,31 +1,44 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Dict
+from typing import List, Dict, Optional
+from pydantic import BaseModel
 import tempfile
 import os
 
 from database.database import get_async_session
 from database.models import Student
 from parser.excel_parser import parse_students_excel
-from utils.auth import generate_multiple_codes
+from utils.auth import generate_multiple_codes, generate_registration_code
 
 router = APIRouter(prefix="/api/students", tags=["Students"])
 
 
+class StudentCreate(BaseModel):
+    full_name: str
+    class_number: Optional[int] = None
+    parallel: Optional[str] = None
+
+
+class StudentUpdate(BaseModel):
+    full_name: Optional[str] = None
+    class_number: Optional[int] = None
+    parallel: Optional[str] = None
+
+
 @router.get("/", response_model=List[Dict])
 async def get_all_students(
-    include_inactive: bool = False,
+    include_inactive: bool = Query(False, description="Включить не зарегистрированных учеников"),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Получить всех учеников"""
-    query = select(Student)
+    query = select(Student).order_by(Student.class_number, Student.parallel, Student.full_name)
     if not include_inactive:
         query = query.where(Student.is_registered == True)
-    
+
     result = await session.execute(query)
     students = result.scalars().all()
-    
+
     return [
         {
             "id": s.id,

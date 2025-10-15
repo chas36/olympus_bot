@@ -144,7 +144,7 @@ async def upload_codes_csv(
     }
 
 
-async def reserve_grade9_for_grade8(session: AsyncSession) -> Dict:
+async def reserve_grade9_for_grade8(session: AsyncSession, session_id: int = None) -> Dict:
     """
     Автоматическое резервирование кодов 9 класса для 8 классов
 
@@ -152,15 +152,26 @@ async def reserve_grade9_for_grade8(session: AsyncSession) -> Dict:
     1. Группируем 8-классников по параллелям
     2. Для каждой параллели выделяем количество резервных кодов = количеству учеников
     3. Берем нераспределенные коды 9 класса
-    """
-    # Получаем активную сессию
-    result = await session.execute(
-        select(OlympiadSession).where(OlympiadSession.is_active == True)
-    )
-    active_session = result.scalar_one_or_none()
 
-    if not active_session:
-        return {"message": "Нет активной сессии", "reserved": 0}
+    Args:
+        session: Сессия БД
+        session_id: ID сессии олимпиады (если None, используется активная сессия)
+    """
+    # Получаем сессию олимпиады
+    if session_id:
+        result = await session.execute(
+            select(OlympiadSession).where(OlympiadSession.id == session_id)
+        )
+        active_session = result.scalar_one_or_none()
+        if not active_session:
+            return {"message": f"Сессия {session_id} не найдена", "reserved": 0}
+    else:
+        result = await session.execute(
+            select(OlympiadSession).where(OlympiadSession.is_active == True)
+        )
+        active_session = result.scalar_one_or_none()
+        if not active_session:
+            return {"message": "Нет активной сессии", "reserved": 0}
 
     # Получаем 8-классников по параллелям
     result = await session.execute(
@@ -193,36 +204,76 @@ async def reserve_grade9_for_grade8(session: AsyncSession) -> Dict:
     if not grade9_codes:
         return {"message": "Нет доступных кодов 9 класса", "reserved": 0}
 
-    # Распределяем коды между параллелями
+    # Считаем сколько учеников 9 класса
+    result = await session.execute(
+        select(func.count(Student.id)).where(Student.class_number == 9)
+    )
+    grade9_students_count = result.scalar()
+
+    # Реальный резерв = нераспределенные коды минус количество учеников 9 класса
+    # (т.к. эти коды должны быть зарезервированы для самих 9-классников)
+    actual_surplus = len(grade9_codes) - grade9_students_count
+
+    if actual_surplus <= 0:
+        return {
+            "message": f"Нет избыточных кодов 9 класса (всего кодов: {len(grade9_codes)}, учеников: {grade9_students_count})",
+            "reserved": 0
+        }
+
+    logger.info(f"Всего кодов 9 класса: {len(grade9_codes)}, учеников 9 класса: {grade9_students_count}, избыток: {actual_surplus}")
+
+    # Берем только избыточные коды для резервирования
+    grade9_codes_for_reserve = grade9_codes[:actual_surplus]
+
+    # Распределяем коды пропорционально численности параллелей
+    total_students = sum(len(students) for students in students_by_parallel.values())
+    total_available_codes = len(grade9_codes_for_reserve)
+
+    logger.info(f"Всего учеников 8 класса: {total_students}")
+    logger.info(f"Доступных кодов 9 класса: {total_available_codes}")
+
+    # Рассчитываем пропорции для каждой параллели
+    distribution = {}
+    for parallel, students in students_by_parallel.items():
+        student_count = len(students)
+        proportion = student_count / total_students
+        codes_for_parallel = int(total_available_codes * proportion)
+        distribution[parallel] = {
+            'student_count': student_count,
+            'proportion': proportion,
+            'codes_allocated': codes_for_parallel
+        }
+
+    # Распределяем коды
     code_index = 0
     total_reserved = 0
 
-    for parallel, students in sorted(students_by_parallel.items()):
-        codes_needed = len(students)
-        codes_allocated = 0
+    for parallel in sorted(distribution.keys()):
+        info = distribution[parallel]
+        codes_to_allocate = info['codes_allocated']
 
-        for i in range(codes_needed):
-            if code_index >= len(grade9_codes):
+        for i in range(codes_to_allocate):
+            if code_index >= len(grade9_codes_for_reserve):
                 break
 
             reserve_code = Grade8ReserveCode(
                 session_id=active_session.id,
                 class_parallel=parallel,
-                code=grade9_codes[code_index].code
+                code=grade9_codes_for_reserve[code_index].code
             )
             session.add(reserve_code)
             code_index += 1
-            codes_allocated += 1
             total_reserved += 1
 
-        logger.info(f"Для {parallel}: выделено {codes_allocated} резервных кодов")
+        logger.info(f"Для {parallel}: {info['student_count']} учеников, выделено {codes_to_allocate} резервных кодов ({info['proportion']*100:.1f}%)")
 
     await session.commit()
 
     return {
-        "message": f"Зарезервировано {total_reserved} кодов из 9 класса для 8 классов",
+        "message": f"Зарезервировано {total_reserved} кодов из 9 класса для 8 классов (пропорционально численности)",
         "reserved": total_reserved,
-        "parallels": len(students_by_parallel)
+        "parallels": len(students_by_parallel),
+        "distribution": {k: v['codes_allocated'] for k, v in distribution.items()}
     }
 
 
@@ -365,6 +416,7 @@ async def export_session_codes(
     # Получаем резервные коды для 8 класса (из пула 9 класса)
     result = await session.execute(
         select(Grade8ReserveCode)
+        .options(joinedload(Grade8ReserveCode.used_by))
         .where(Grade8ReserveCode.session_id == session_id)
         .order_by(Grade8ReserveCode.class_parallel)
     )
@@ -389,7 +441,13 @@ async def export_session_codes(
     # Добавляем резервные коды для 8 класса
     reserve_by_parallel = {}
     for reserve_code in reserve_codes:
-        parallel = reserve_code.class_parallel.replace('8', '')  # "8А" -> "А"
+        # "8А" -> "А", "8И" -> "И"
+        class_parallel = reserve_code.class_parallel
+        if class_parallel.startswith('8'):
+            parallel = class_parallel[1:]  # Убираем первый символ "8"
+        else:
+            parallel = class_parallel
+
         if parallel not in reserve_by_parallel:
             reserve_by_parallel[parallel] = []
         reserve_by_parallel[parallel].append(reserve_code)
@@ -445,7 +503,12 @@ async def export_session_codes(
 
                     # Добавляем резервные коды
                     for reserve_code in reserve_by_parallel[parallel]:
-                        ws[f'A{row}'] = "Резервный код"
+                        # Если код уже использован, показываем кто его получил
+                        if reserve_code.is_used and reserve_code.used_by:
+                            ws[f'A{row}'] = f"{reserve_code.used_by.full_name} (резервный)"
+                            ws[f'A{row}'].font = Font(italic=True, color="0070C0")
+                        else:
+                            ws[f'A{row}'] = "Резервный код"
                         ws[f'B{row}'] = reserve_code.code
                         row += 1
 
@@ -598,9 +661,14 @@ async def distribute_codes_to_students(
 
     await session.commit()
 
+    # Автоматически резервируем коды 9 класса для 8 класса
+    reserve_result = await reserve_grade9_for_grade8(session, session_id=session_id)
+    logger.info(f"Резервирование для сессии {session_id}: {reserve_result}")
+
     return {
         "success": True,
         "message": f"Распределено {distributed_count} кодов",
         "distributed": distributed_count,
-        "distribution_log": distribution_log
+        "distribution_log": distribution_log,
+        "reserve_info": reserve_result
     }
