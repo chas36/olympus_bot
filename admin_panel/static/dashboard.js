@@ -394,45 +394,48 @@ async function loadCodesStats() {
     try {
         const response = await fetch('/api/codes/stats');
         const data = await response.json();
-        
+
+        const grade8 = data.by_class?.grade8 || { total: 0, assigned: 0, unassigned: 0, issued: 0 };
+        const grade8Reserve = data.grade8_reserve || { total: 0, used: 0, available: 0 };
+
         const statsHTML = `
             <h6 class="mb-3">8 класс:</h6>
             <div class="mb-3">
                 <div class="d-flex justify-content-between mb-1">
                     <span>Всего:</span>
-                    <strong>${data.grade8.total}</strong>
+                    <strong>${grade8.total}</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Распределено:</span>
-                    <strong class="text-success">${data.grade8.assigned}</strong>
+                    <strong class="text-success">${grade8.assigned}</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Не распределено:</span>
-                    <strong class="text-warning">${data.grade8.unassigned}</strong>
+                    <strong class="text-warning">${grade8.unassigned}</strong>
                 </div>
                 <div class="d-flex justify-content-between">
                     <span>Выдано:</span>
-                    <strong class="text-info">${data.grade8.issued}</strong>
+                    <strong class="text-info">${grade8.issued}</strong>
                 </div>
             </div>
-            
-            <h6 class="mb-3">9 класс (резерв):</h6>
+
+            <h6 class="mb-3">Резерв 8 класса (из 9 класса):</h6>
             <div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Всего:</span>
-                    <strong>${data.grade9.total}</strong>
+                    <strong>${grade8Reserve.total}</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Использовано:</span>
-                    <strong class="text-danger">${data.grade9.used}</strong>
+                    <strong class="text-danger">${grade8Reserve.used}</strong>
                 </div>
                 <div class="d-flex justify-content-between">
                     <span>Доступно:</span>
-                    <strong class="text-success">${data.grade9.available}</strong>
+                    <strong class="text-success">${grade8Reserve.available}</strong>
                 </div>
             </div>
         `;
-        
+
         document.getElementById('codesStats').innerHTML = statsHTML;
     } catch (error) {
         console.error('Ошибка загрузки статистики кодов:', error);
@@ -562,11 +565,13 @@ async function loadSessions() {
                                         : '<span class="badge bg-secondary">Неактивна</span>'}
                                 </td>
                                 <td>
-                                    ${!s.is_active
-                                        ? `<button class="btn btn-sm btn-primary" onclick="activateSession(${s.id})">
-                                            <i class="bi bi-play"></i> Активировать
+                                    ${s.is_active
+                                        ? `<button class="btn btn-sm btn-danger" onclick="deactivateSession(${s.id})">
+                                            <i class="bi bi-pause-circle"></i> Деактивировать
                                            </button>`
-                                        : '<button class="btn btn-sm btn-secondary" disabled>Активна</button>'}
+                                        : `<button class="btn btn-sm btn-primary" onclick="activateSession(${s.id})">
+                                            <i class="bi bi-play"></i> Активировать
+                                           </button>`}
                                     <button class="btn btn-sm btn-warning" onclick="distributeSessionCodes(${s.id})">
                                         <i class="bi bi-arrow-down-up"></i> Распределить
                                     </button>
@@ -606,6 +611,30 @@ async function activateSession(sessionId) {
         }
     } catch (error) {
         alert('Ошибка активации: ' + error.message);
+    }
+}
+
+async function deactivateSession(sessionId) {
+    if (!confirm('Деактивировать эту сессию?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/olympiads/${sessionId}/deactivate`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Сессия деактивирована!');
+            loadSessions();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка деактивации: ' + error.message);
     }
 }
 
@@ -1157,10 +1186,12 @@ function loadOlympiadInfo() {
 
     if (!selectedOption.value) {
         document.getElementById('olympiadInfo').innerHTML = '';
+        document.getElementById('olympiadActionButtons').innerHTML = '';
         return;
     }
 
     const olympiad = JSON.parse(selectedOption.dataset.olympiad);
+    console.log('Загружена олимпиада:', olympiad.subject, 'Активна:', olympiad.is_active);
 
     document.getElementById('olympiadInfo').innerHTML = `
         <div class="alert alert-info">
@@ -1172,6 +1203,29 @@ function loadOlympiadInfo() {
                 : '<span class="badge bg-secondary">Неактивна</span>'}
         </div>
     `;
+
+    // Показываем кнопки в зависимости от статуса
+    if (olympiad.is_active) {
+        console.log('Показываем кнопку деактивации');
+        document.getElementById('olympiadActionButtons').innerHTML = `
+            <button class="btn btn-warning w-100 mb-2" onclick="deactivateOlympiad()">
+                <i class="bi bi-pause-circle"></i> Деактивировать
+            </button>
+            <button class="btn btn-danger w-100 mb-2" onclick="deleteOlympiad()">
+                <i class="bi bi-trash"></i> Удалить олимпиаду
+            </button>
+        `;
+    } else {
+        console.log('Показываем кнопку активации');
+        document.getElementById('olympiadActionButtons').innerHTML = `
+            <button class="btn btn-success w-100 mb-2" onclick="activateOlympiad()">
+                <i class="bi bi-check-circle"></i> Активировать
+            </button>
+            <button class="btn btn-danger w-100 mb-2" onclick="deleteOlympiad()">
+                <i class="bi bi-trash"></i> Удалить олимпиаду
+            </button>
+        `;
+    }
 }
 
 // Активация олимпиады
@@ -1206,6 +1260,38 @@ async function activateOlympiad() {
     }
 }
 
+// Деактивация олимпиады
+async function deactivateOlympiad() {
+    const olympiadId = document.getElementById('olympiadSelect').value;
+    if (!olympiadId) {
+        alert('Выберите олимпиаду');
+        return;
+    }
+
+    if (!confirm('Деактивировать эту олимпиаду?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/olympiads/${olympiadId}/deactivate`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Олимпиада деактивирована!');
+            loadManagementData();
+            loadOlympiadInfo();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка деактивации: ' + error.message);
+    }
+}
+
 // Удаление олимпиады
 async function deleteOlympiad() {
     const olympiadId = document.getElementById('olympiadSelect').value;
@@ -1229,6 +1315,39 @@ async function deleteOlympiad() {
             alert('✅ Олимпиада удалена');
             document.getElementById('olympiadSelect').value = '';
             document.getElementById('olympiadInfo').innerHTML = '';
+            document.getElementById('olympiadActionButtons').innerHTML = '';
+            loadManagementData();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка удаления: ' + error.message);
+    }
+}
+
+// Удаление всех олимпиад
+async function deleteAllOlympiads() {
+    if (!confirm('⚠️⚠️⚠️ ВЫ УВЕРЕНЫ?\n\nЭто действие удалит ВСЕ олимпиады и все связанные коды!\nЭто действие НЕОБРАТИМО!')) {
+        return;
+    }
+
+    if (!confirm('Последнее предупреждение!\nВы действительно хотите удалить ВСЕ олимпиады?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/admin/olympiads', {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✅ Удалено олимпиад: ${result.deleted_count}`);
+            document.getElementById('olympiadSelect').value = '';
+            document.getElementById('olympiadInfo').innerHTML = '';
+            document.getElementById('olympiadActionButtons').innerHTML = '';
             loadManagementData();
             loadDashboard();
         } else {

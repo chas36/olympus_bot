@@ -213,7 +213,7 @@ async def get_recent_activity(
             "type": "code_request",
             "student": student.full_name if student else "Неизвестен",
             "subject": olympiad.subject if olympiad else "Неизвестен",
-            "timestamp": req.requested_at.isoformat(),
+            "timestamp": req.requested_at.isoformat() if req.requested_at else None,
             "screenshot": req.screenshot_submitted
         })
 
@@ -330,7 +330,7 @@ async def get_active_session_participants(
             "student_id": student.id,
             "full_name": student.full_name,
             "class_display": f"{student.class_number}{student.parallel or ''}" if student.class_number else "-",
-            "requested_at": req.requested_at.isoformat(),
+            "requested_at": req.requested_at.isoformat() if req.requested_at else None,
             "code": req.code,
             "screenshot_submitted": req.screenshot_submitted,
             "screenshot_submitted_at": req.screenshot_submitted_at.isoformat() if req.screenshot_submitted_at else None
