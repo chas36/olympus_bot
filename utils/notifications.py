@@ -252,23 +252,37 @@ async def notify_students_olympiad_activated(bot: Bot, session_id: int, subject:
         date: Дата проведения
         db: Сессия базы данных
     """
-    from database.models import Student, OlympiadSession
+    from database.models import Student, OlympiadSession, OlympiadCode
     from datetime import datetime
+    from sqlalchemy import distinct
 
     # Проверяем, включены ли уведомления об олимпиадах
     if not await check_notifications_enabled(db, check_olympiad=True):
         logger.info("Уведомления об олимпиадах отключены")
         return
 
-    # Получаем всех зарегистрированных учеников с включенными уведомлениями
+    # Получаем список классов, для которых доступны коды в этой сессии
+    available_classes = db.query(distinct(OlympiadCode.class_number)).filter(
+        OlympiadCode.session_id == session_id
+    ).all()
+
+    if not available_classes:
+        logger.info(f"Нет доступных кодов для сессии {session_id}")
+        return
+
+    available_class_numbers = [c[0] for c in available_classes]
+    logger.info(f"Олимпиада '{subject}' доступна для классов: {available_class_numbers}")
+
+    # Получаем учеников только тех классов, для которых есть коды
     students = db.query(Student).filter(
         Student.is_registered == True,
         Student.notifications_enabled == True,
-        Student.telegram_id.isnot(None)
+        Student.telegram_id.isnot(None),
+        Student.class_number.in_(available_class_numbers)
     ).all()
 
     if not students:
-        logger.info("Нет учеников для отправки уведомлений")
+        logger.info("Нет учеников для отправки уведомлений (нет учеников подходящих классов)")
         return
 
     # Форматируем дату

@@ -66,6 +66,18 @@ async def cmd_get_code(message: Message, state: FSMContext):
             )
             return
 
+        # Проверяем, доступна ли олимпиада для класса ученика
+        has_codes_for_class = await crud.has_codes_for_class(
+            session, active_session.id, student.class_number
+        )
+
+        if not has_codes_for_class:
+            await message.answer(
+                f"❌ Олимпиада по предмету {active_session.subject} недоступна для {student.class_number} класса.\n\n"
+                f"Эта олимпиада проводится только для других классов."
+            )
+            return
+
         # Только для 8 класса показываем выбор между 8 и 9 классом
         if student.class_number == 8:
             # Сохраняем ID сессии в состоянии

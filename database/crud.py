@@ -599,6 +599,33 @@ async def get_available_code_for_class(
     return result.scalar_one_or_none()
 
 
+async def has_codes_for_class(
+    session: AsyncSession,
+    session_id: int,
+    class_number: int
+) -> bool:
+    """
+    Проверяет, есть ли коды для указанного класса в сессии
+
+    Args:
+        session: Асинхронная сессия БД
+        session_id: ID сессии олимпиады
+        class_number: Номер класса
+
+    Returns:
+        True если есть коды для этого класса, False иначе
+    """
+    result = await session.execute(
+        select(OlympiadCode).where(
+            and_(
+                OlympiadCode.session_id == session_id,
+                OlympiadCode.class_number == class_number
+            )
+        ).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def mark_code_issued(
     session: AsyncSession,
     code_id: int,
