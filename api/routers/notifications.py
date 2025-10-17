@@ -197,3 +197,72 @@ async def get_students_with_disabled_notifications(session: AsyncSession = Depen
             for student in students
         ]
     }
+
+
+@router.get("/olympiad/status")
+async def get_olympiad_notification_status(session: AsyncSession = Depends(get_async_session)):
+    """
+    Получить статус уведомлений об олимпиадах
+    """
+    result = await session.execute(select(NotificationSettings))
+    settings = result.scalar_one_or_none()
+
+    if not settings:
+        # Создаем настройки по умолчанию, если их нет
+        settings = NotificationSettings(notifications_enabled=True, olympiad_notifications_enabled=True)
+        session.add(settings)
+        await session.commit()
+        await session.refresh(settings)
+
+    return {
+        "olympiad_notifications_enabled": settings.olympiad_notifications_enabled,
+        "global_notifications_enabled": settings.notifications_enabled
+    }
+
+
+@router.put("/olympiad/enable")
+async def enable_olympiad_notifications(session: AsyncSession = Depends(get_async_session)):
+    """
+    Включить уведомления об активации олимпиад
+    """
+    result = await session.execute(select(NotificationSettings))
+    settings = result.scalar_one_or_none()
+
+    if not settings:
+        settings = NotificationSettings(notifications_enabled=True, olympiad_notifications_enabled=True)
+        session.add(settings)
+    else:
+        settings.olympiad_notifications_enabled = True
+
+    await session.commit()
+    await session.refresh(settings)
+
+    return {
+        "success": True,
+        "message": "Уведомления об олимпиадах включены",
+        "olympiad_notifications_enabled": settings.olympiad_notifications_enabled
+    }
+
+
+@router.put("/olympiad/disable")
+async def disable_olympiad_notifications(session: AsyncSession = Depends(get_async_session)):
+    """
+    Отключить уведомления об активации олимпиад
+    """
+    result = await session.execute(select(NotificationSettings))
+    settings = result.scalar_one_or_none()
+
+    if not settings:
+        settings = NotificationSettings(notifications_enabled=True, olympiad_notifications_enabled=False)
+        session.add(settings)
+    else:
+        settings.olympiad_notifications_enabled = False
+
+    await session.commit()
+    await session.refresh(settings)
+
+    return {
+        "success": True,
+        "message": "Уведомления об олимпиадах отключены",
+        "olympiad_notifications_enabled": settings.olympiad_notifications_enabled
+    }

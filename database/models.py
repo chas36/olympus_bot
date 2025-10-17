@@ -52,6 +52,8 @@ class OlympiadSession(Base):
     upload_time = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=False)  # По умолчанию неактивна
     uploaded_file_name = Column(String(255), nullable=True)
+    notification_sent = Column(Boolean, default=False)  # Отправлено ли уведомление об активации
+    notification_scheduled_for = Column(DateTime, nullable=True)  # Время запланированной отправки уведомления
 
     # Relationships
     grade8_codes = relationship("Grade8Code", back_populates="session", cascade="all, delete-orphan")
@@ -218,7 +220,8 @@ class NotificationSettings(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     notifications_enabled = Column(Boolean, default=True)  # Глобальное включение/выключение уведомлений
+    olympiad_notifications_enabled = Column(Boolean, default=True)  # Уведомления об активации олимпиад
     updated_at = Column(DateTime, default=moscow_now, onupdate=moscow_now)
 
     def __repr__(self):
-        return f"<NotificationSettings(id={self.id}, enabled={self.notifications_enabled})>"
+        return f"<NotificationSettings(id={self.id}, enabled={self.notifications_enabled}, olympiad_notif={self.olympiad_notifications_enabled})>"

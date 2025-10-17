@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadCodesStats();
     loadSessions();
     loadRecentActivity();
+    loadGlobalNotificationStatus();
+    loadOlympiadNotificationStatus();
 
     // Автообновление каждые 30 секунд
     setInterval(() => {
@@ -1191,7 +1193,6 @@ function loadOlympiadInfo() {
     }
 
     const olympiad = JSON.parse(selectedOption.dataset.olympiad);
-    console.log('Загружена олимпиада:', olympiad.subject, 'Активна:', olympiad.is_active);
 
     document.getElementById('olympiadInfo').innerHTML = `
         <div class="alert alert-info">
@@ -1206,7 +1207,6 @@ function loadOlympiadInfo() {
 
     // Показываем кнопки в зависимости от статуса
     if (olympiad.is_active) {
-        console.log('Показываем кнопку деактивации');
         document.getElementById('olympiadActionButtons').innerHTML = `
             <button class="btn btn-warning w-100 mb-2" onclick="deactivateOlympiad()">
                 <i class="bi bi-pause-circle"></i> Деактивировать
@@ -1216,7 +1216,6 @@ function loadOlympiadInfo() {
             </button>
         `;
     } else {
-        console.log('Показываем кнопку активации');
         document.getElementById('olympiadActionButtons').innerHTML = `
             <button class="btn btn-success w-100 mb-2" onclick="activateOlympiad()">
                 <i class="bi bi-check-circle"></i> Активировать
@@ -1372,6 +1371,66 @@ async function loadGlobalNotificationStatus() {
         }
     } catch (error) {
         console.error('Ошибка загрузки статуса уведомлений:', error);
+    }
+}
+
+// Загрузка статуса уведомлений об олимпиадах
+async function loadOlympiadNotificationStatus() {
+    try {
+        const response = await fetch('/api/notifications/olympiad/status');
+        const data = await response.json();
+
+        const switchElement = document.getElementById('olympiadNotificationsSwitch');
+        if (switchElement) {
+            switchElement.checked = data.olympiad_notifications_enabled;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки статуса уведомлений об олимпиадах:', error);
+    }
+}
+
+// Переключить глобальные уведомления через переключатель
+async function toggleGlobalNotifications(enabled) {
+    try {
+        const response = await fetch('/api/notifications/global', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ notifications_enabled: enabled })
+        });
+
+        const result = await response.json();
+
+        if (result.notifications_enabled === enabled) {
+            const status = enabled ? 'включены' : 'отключены';
+            console.log(`Глобальные уведомления ${status}`);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+        // Возвращаем переключатель в предыдущее состояние
+        document.getElementById('globalNotificationsSwitch').checked = !enabled;
+    }
+}
+
+// Переключить уведомления об олимпиадах через переключатель
+async function toggleOlympiadNotifications(enabled) {
+    try {
+        const endpoint = enabled ? '/api/notifications/olympiad/enable' : '/api/notifications/olympiad/disable';
+        const response = await fetch(endpoint, {
+            method: 'PUT'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            const status = enabled ? 'включены' : 'отключены';
+            console.log(`Уведомления об олимпиадах ${status}`);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+        // Возвращаем переключатель в предыдущее состояние
+        document.getElementById('olympiadNotificationsSwitch').checked = !enabled;
     }
 }
 
@@ -1714,3 +1773,198 @@ async function updateStudent() {
         alert('❌ Ошибка обновления ученика: ' + error.message);
     }
 }
+
+// ==================== СКРИНШОТЫ ====================
+
+let allScreenshots = [];
+
+// Загрузка статистики скриншотов
+async function loadScreenshotsStats() {
+    try {
+        const response = await fetch('/api/screenshots/stats');
+        const data = await response.json();
+
+        const statsHTML = `
+            <div class="col-md-4">
+                <div class="card stat-card success">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-check-circle"></i> Отправлено</h6>
+                        <h2 class="mb-0">${data.total_submitted}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card warning">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-hourglass"></i> Ожидается</h6>
+                        <h2 class="mb-0">${data.total_expected}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card info">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-percent"></i> Процент отправки</h6>
+                        <h2 class="mb-0">${data.submission_rate}%</h2>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('screenshotsStatsCards').innerHTML = statsHTML;
+    } catch (error) {
+        console.error('Ошибка загрузки статистики скриншотов:', error);
+    }
+}
+
+// Загрузка списка скриншотов
+async function loadScreenshots() {
+    try {
+        const response = await fetch('/api/screenshots/list');
+        allScreenshots = await response.json();
+
+        // Заполняем фильтры
+        populateScreenshotFilters();
+
+        // Показываем скриншоты
+        filterScreenshots();
+    } catch (error) {
+        console.error('Ошибка загрузки скриншотов:', error);
+        document.getElementById('screenshotsList').innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Ошибка загрузки скриншотов
+                </div>
+            </div>
+        `;
+    }
+}
+
+// Заполнение фильтров
+function populateScreenshotFilters() {
+    // Уникальные предметы
+    const subjects = [...new Set(allScreenshots.map(s => s.subject))];
+    const subjectFilter = document.getElementById('screenshotSubjectFilter');
+    subjectFilter.innerHTML = '<option value="">Все предметы</option>';
+    subjects.forEach(subject => {
+        subjectFilter.innerHTML += `<option value="${subject}">${subject}</option>`;
+    });
+
+    // Уникальные сессии
+    const sessions = [...new Map(allScreenshots.map(s => [s.session_id, s])).values()];
+    const sessionFilter = document.getElementById('screenshotSessionFilter');
+    sessionFilter.innerHTML = '<option value="">Все сессии</option>';
+    sessions.forEach(s => {
+        const date = s.olympiad_date ? new Date(s.olympiad_date).toLocaleDateString('ru-RU') : 'Не указана';
+        sessionFilter.innerHTML += `<option value="${s.session_id}">${s.subject} - ${date}</option>`;
+    });
+}
+
+// Фильтрация скриншотов
+function filterScreenshots() {
+    const subjectFilter = document.getElementById('screenshotSubjectFilter').value;
+    const classFilter = document.getElementById('screenshotClassFilter').value;
+    const sessionFilter = document.getElementById('screenshotSessionFilter').value;
+
+    let filtered = allScreenshots;
+
+    if (subjectFilter) {
+        filtered = filtered.filter(s => s.subject === subjectFilter);
+    }
+
+    if (classFilter) {
+        filtered = filtered.filter(s => s.student_class.startsWith(classFilter));
+    }
+
+    if (sessionFilter) {
+        filtered = filtered.filter(s => s.session_id == sessionFilter);
+    }
+
+    displayScreenshots(filtered);
+}
+
+// Отображение скриншотов
+function displayScreenshots(screenshots) {
+    document.getElementById('screenshotsCount').textContent = screenshots.length;
+
+    if (screenshots.length === 0) {
+        document.getElementById('screenshotsList').innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Скриншоты не найдены
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    screenshots.forEach(screenshot => {
+        const date = new Date(screenshot.submitted_at).toLocaleString('ru-RU');
+        const fileExistsIcon = screenshot.file_exists
+            ? '<i class="bi bi-check-circle text-success"></i>'
+            : '<i class="bi bi-x-circle text-danger"></i>';
+
+        html += `
+            <div class="col-md-4 col-lg-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-header bg-light">
+                        <small class="text-muted">${screenshot.subject}</small>
+                    </div>
+                    <div class="card-body">
+                        <h6 class="card-title">${screenshot.student_name}</h6>
+                        <p class="card-text">
+                            <small>
+                                <i class="bi bi-mortarboard"></i> Класс: ${screenshot.student_class}<br>
+                                <i class="bi bi-calendar"></i> ${date}<br>
+                                ${fileExistsIcon} Файл ${screenshot.file_exists ? 'доступен' : 'не найден'}
+                            </small>
+                        </p>
+                    </div>
+                    <div class="card-footer bg-transparent">
+                        ${screenshot.file_exists
+                            ? `<button class="btn btn-sm btn-primary w-100" onclick="viewScreenshot(${screenshot.id}, '${screenshot.student_name}', '${screenshot.subject}')">
+                                <i class="bi bi-eye"></i> Просмотреть
+                               </button>`
+                            : '<button class="btn btn-sm btn-secondary w-100" disabled>Файл недоступен</button>'
+                        }
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    document.getElementById('screenshotsList').innerHTML = html;
+}
+
+// Просмотр скриншота
+function viewScreenshot(requestId, studentName, subject) {
+    const modalTitle = document.getElementById('screenshotModalTitle');
+    const modalImage = document.getElementById('screenshotModalImage');
+    const modalInfo = document.getElementById('screenshotModalInfo');
+
+    modalTitle.textContent = `${studentName} - ${subject}`;
+    modalImage.src = `/api/screenshots/view/${requestId}`;
+
+    const screenshot = allScreenshots.find(s => s.id === requestId);
+    if (screenshot) {
+        const date = new Date(screenshot.submitted_at).toLocaleString('ru-RU');
+        modalInfo.innerHTML = `
+            <div class="text-start">
+                <p><strong>Ученик:</strong> ${screenshot.student_name}</p>
+                <p><strong>Класс:</strong> ${screenshot.student_class}</p>
+                <p><strong>Предмет:</strong> ${screenshot.subject}</p>
+                <p><strong>Дата отправки:</strong> ${date}</p>
+            </div>
+        `;
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('screenshotModal'));
+    modal.show();
+}
+
+// Загрузка при открытии вкладки скриншотов
+document.querySelector('[data-bs-target="#screenshots-tab"]').addEventListener('click', function() {
+    loadScreenshotsStats();
+    loadScreenshots();
+});

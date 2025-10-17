@@ -328,25 +328,85 @@ async def activate_session(
     session_id: int,
     session: AsyncSession = Depends(get_async_session)
 ):
-    """Активировать сессию"""
+    """Активировать сессию и отправить уведомления ученикам"""
+    import os
+    from aiogram import Bot
+    from utils.scheduler import should_delay_notification
+    from utils.notifications import notify_students_olympiad_activated
+
     # Деактивируем все
     result = await session.execute(select(OlympiadSession))
     for s in result.scalars().all():
         s.is_active = False
-    
+
     # Активируем нужную
     result = await session.execute(
         select(OlympiadSession).where(OlympiadSession.id == session_id)
     )
     target = result.scalar_one_or_none()
-    
+
     if not target:
         raise HTTPException(404, "Сессия не найдена")
-    
+
     target.is_active = True
-    await session.commit()
-    
-    return {"success": True, "session_id": session_id}
+
+    # Проверяем, нужно ли отложить уведомление
+    should_delay, scheduled_time = should_delay_notification()
+
+    if should_delay:
+        # Откладываем уведомление до 9:00
+        target.notification_scheduled_for = scheduled_time
+        target.notification_sent = False
+        await session.commit()
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "notification_status": "scheduled",
+            "scheduled_for": scheduled_time.isoformat()
+        }
+    else:
+        # Отправляем уведомление сразу
+        await session.commit()
+
+        # Создаем синхронную сессию для функции уведомлений
+        from database.database import SessionLocal
+        sync_db = SessionLocal()
+
+        # Создаем экземпляр бота
+        bot_token = os.getenv("BOT_TOKEN")
+        if not bot_token:
+            return {
+                "success": True,
+                "session_id": session_id,
+                "notification_status": "skipped",
+                "message": "BOT_TOKEN не настроен"
+            }
+
+        bot = Bot(token=bot_token)
+
+        try:
+            notification_result = await notify_students_olympiad_activated(
+                bot=bot,
+                session_id=target.id,
+                subject=target.subject,
+                date=target.date.isoformat() if target.date else "",
+                db=sync_db
+            )
+
+            await bot.session.close()
+
+            return {
+                "success": True,
+                "session_id": session_id,
+                "notification_status": "sent",
+                "notification_result": notification_result
+            }
+        except Exception as e:
+            await bot.session.close()
+            raise HTTPException(500, f"Ошибка отправки уведомлений: {str(e)}")
+        finally:
+            sync_db.close()
 
 
 @router.get("/stats")

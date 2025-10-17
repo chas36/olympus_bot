@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 
 # Импортируем новые роутеры
-from api.routers import students, codes, monitoring, admin, dashboard, notifications
+from api.routers import students, codes, monitoring, admin, dashboard, notifications, screenshots
 
 # Создаем приложение
 app = FastAPI(
@@ -30,6 +30,7 @@ app.include_router(codes.router)
 app.include_router(monitoring.router)
 app.include_router(admin.router)
 app.include_router(notifications.router)
+app.include_router(screenshots.router)
 
 # Создаем директории если их нет
 os.makedirs("admin_panel/static", exist_ok=True)

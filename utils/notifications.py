@@ -17,13 +17,14 @@ logger = logging.getLogger(__name__)
 ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
 
 
-async def check_notifications_enabled(db: Session, student_id: Optional[int] = None) -> bool:
+async def check_notifications_enabled(db: Session, student_id: Optional[int] = None, check_olympiad: bool = False) -> bool:
     """
     Проверка, включены ли уведомления глобально и для конкретного ученика
 
     Args:
         db: Сессия базы данных
         student_id: ID ученика (опционально)
+        check_olympiad: Проверять ли настройку уведомлений об олимпиадах
 
     Returns:
         True если уведомления включены, False иначе
@@ -33,6 +34,10 @@ async def check_notifications_enabled(db: Session, student_id: Optional[int] = N
     # Проверяем глобальную настройку
     global_settings = db.query(NotificationSettings).first()
     if global_settings and not global_settings.notifications_enabled:
+        return False
+
+    # Проверяем настройку уведомлений об олимпиадах
+    if check_olympiad and global_settings and not global_settings.olympiad_notifications_enabled:
         return False
 
     # Если указан ученик, проверяем его настройки
@@ -234,3 +239,71 @@ async def notify_admin_error(bot: Bot, error_message: str, context: str = "", db
         await bot.send_message(ADMIN_TELEGRAM_ID, message, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления об ошибке: {e}")
+
+
+async def notify_students_olympiad_activated(bot: Bot, session_id: int, subject: str, date: str, db: Session):
+    """
+    Уведомление всем ученикам об активации олимпиады
+
+    Args:
+        bot: Экземпляр бота
+        session_id: ID сессии олимпиады
+        subject: Предмет олимпиады
+        date: Дата проведения
+        db: Сессия базы данных
+    """
+    from database.models import Student, OlympiadSession
+    from datetime import datetime
+
+    # Проверяем, включены ли уведомления об олимпиадах
+    if not await check_notifications_enabled(db, check_olympiad=True):
+        logger.info("Уведомления об олимпиадах отключены")
+        return
+
+    # Получаем всех зарегистрированных учеников с включенными уведомлениями
+    students = db.query(Student).filter(
+        Student.is_registered == True,
+        Student.notifications_enabled == True,
+        Student.telegram_id.isnot(None)
+    ).all()
+
+    if not students:
+        logger.info("Нет учеников для отправки уведомлений")
+        return
+
+    # Форматируем дату
+    try:
+        date_obj = datetime.fromisoformat(date.replace('Z', '+00:00'))
+        formatted_date = date_obj.strftime('%d.%m.%Y')
+    except:
+        formatted_date = date
+
+    message = (
+        f"📚 <b>Доступна новая олимпиада!</b>\n\n"
+        f"Предмет: <b>{subject}</b>\n"
+        f"Дата: {formatted_date}\n\n"
+        f"Вы можете получить код для участия, написав команду /get_code"
+    )
+
+    # Отправляем уведомления
+    sent_count = 0
+    failed_count = 0
+
+    for student in students:
+        try:
+            await bot.send_message(student.telegram_id, message, parse_mode="HTML")
+            sent_count += 1
+            logger.info(f"Уведомление отправлено ученику {student.full_name} (ID: {student.telegram_id})")
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Ошибка отправки уведомления ученику {student.full_name}: {e}")
+
+    logger.info(f"Уведомления об олимпиаде '{subject}': отправлено {sent_count}, ошибок {failed_count}")
+
+    # Помечаем, что уведомление отправлено
+    session = db.query(OlympiadSession).filter(OlympiadSession.id == session_id).first()
+    if session:
+        session.notification_sent = True
+        db.commit()
+
+    return {"sent": sent_count, "failed": failed_count}
