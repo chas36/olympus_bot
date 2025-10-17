@@ -626,6 +626,47 @@ async def has_codes_for_class(
     return result.scalar_one_or_none() is not None
 
 
+async def find_nearest_available_class(
+    session: AsyncSession,
+    session_id: int,
+    start_class: int
+) -> Optional[int]:
+    """
+    Ищет ближайший старший класс с доступными кодами
+
+    Args:
+        session: Асинхронная сессия БД
+        session_id: ID сессии олимпиады
+        start_class: Класс ученика (начальная точка поиска)
+
+    Returns:
+        Номер ближайшего старшего класса с доступными кодами, или None если не найдено
+
+    Example:
+        Ученик 6 класса, коды есть для 7, 8, 9 -> вернет 7
+        Ученик 5 класса, коды есть для 7, 8, 9 -> вернет 7
+        Ученик 10 класса, коды есть для 11 -> вернет 11
+    """
+    # Перебираем классы от start_class до 11
+    for class_number in range(start_class, 12):  # 12 не включается, т.е. до 11
+        # Проверяем, есть ли доступные (невыданные) коды для этого класса
+        result = await session.execute(
+            select(OlympiadCode).where(
+                and_(
+                    OlympiadCode.session_id == session_id,
+                    OlympiadCode.class_number == class_number,
+                    OlympiadCode.is_issued == False
+                )
+            ).limit(1)
+        )
+
+        if result.scalar_one_or_none() is not None:
+            return class_number
+
+    # Не найдено ни одного класса с доступными кодами
+    return None
+
+
 async def mark_code_issued(
     session: AsyncSession,
     code_id: int,

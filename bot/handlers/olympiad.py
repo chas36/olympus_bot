@@ -66,20 +66,21 @@ async def cmd_get_code(message: Message, state: FSMContext):
             )
             return
 
-        # Проверяем, доступна ли олимпиада для класса ученика
-        has_codes_for_class = await crud.has_codes_for_class(
+        # Ищем ближайший доступный класс (каскадный поиск)
+        # Начинаем с класса ученика и ищем вверх до 11 класса
+        available_class = await crud.find_nearest_available_class(
             session, active_session.id, student.class_number
         )
 
-        if not has_codes_for_class:
+        if not available_class:
             await message.answer(
-                f"❌ Олимпиада по предмету {active_session.subject} недоступна для {student.class_number} класса.\n\n"
-                f"Эта олимпиада проводится только для других классов."
+                f"❌ Олимпиада по предмету {active_session.subject} недоступна.\n\n"
+                f"Нет свободных кодов ни для одного класса."
             )
             return
 
-        # Только для 8 класса показываем выбор между 8 и 9 классом
-        if student.class_number == 8:
+        # Только для 8 класса показываем выбор между 8 и 9 классом (если оба доступны)
+        if student.class_number == 8 and available_class == 8:
             # Сохраняем ID сессии в состоянии
             await state.update_data(session_id=active_session.id)
 
@@ -97,16 +98,18 @@ async def cmd_get_code(message: Message, state: FSMContext):
 
             await state.set_state(OlympiadStates.selecting_grade)
         else:
-            # Для остальных классов (5-7, 9-11) выдаем код для их класса
+            # Для остальных классов выдаем код доступного класса
+            # available_class уже найден выше (может быть равен или старше класса ученика)
+
             # Сначала пробуем найти предварительно распределенный код (Вариант 1)
             olympiad_code = await crud.get_assigned_code_for_student(
-                session, student.id, active_session.id, student.class_number
+                session, student.id, active_session.id, available_class
             )
 
             # Если нет распределенного - берем любой доступный (Вариант 2)
             if not olympiad_code:
                 olympiad_code = await crud.get_available_code_for_class(
-                    session, active_session.id, student.class_number
+                    session, active_session.id, available_class
                 )
 
             if not olympiad_code:
@@ -123,13 +126,21 @@ async def cmd_get_code(message: Message, state: FSMContext):
 
             # Создаем запись о запросе кода
             await crud.create_code_request(
-                session, student.id, active_session.id, student.class_number, code
+                session, student.id, active_session.id, available_class, code
             )
+
+            # Формируем сообщение в зависимости от того, свой класс или старший
+            if available_class == student.class_number:
+                # Код для своего класса
+                class_info = f"📋 Класс: {available_class}"
+            else:
+                # Код от старшего класса
+                class_info = f"📋 Класс: {available_class} (для твоего класса кодов нет, выдан код старшего класса)"
 
             # Первое сообщение - информация
             await message.answer(
                 f"✅ Твой код для олимпиады по предмету {active_session.subject}:\n\n"
-                f"📋 Класс: {student.class_number}\n\n"
+                f"{class_info}\n\n"
                 f"⚠️ ВАЖНО: После завершения работы обязательно пришли в бот "
                 f"скриншот или фотографию последней страницы!\n\n"
                 f"💡 Просто отправь фото в этот чат."
