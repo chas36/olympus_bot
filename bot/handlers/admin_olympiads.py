@@ -3,7 +3,7 @@
 """
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, BufferedInputFile
-from database.database import get_async_session
+from database.database import AsyncSessionLocal
 from database import crud
 from bot.keyboards import (
     get_olympiads_management_menu, get_export_menu,
@@ -35,7 +35,7 @@ async def show_olympiads_list(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         sessions = await crud.get_all_sessions(session)
 
         if not sessions:
@@ -70,7 +70,7 @@ async def activate_olympiad_selection(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         sessions = await crud.get_all_sessions(session)
 
         if not sessions:
@@ -102,7 +102,7 @@ async def execute_activate_olympiad(callback: CallbackQuery):
 
     olympiad_id = int(callback.data.split("_")[2])
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         olympiad = await crud.activate_session(session, olympiad_id)
 
         if not olympiad:
@@ -139,7 +139,7 @@ async def deactivate_all_olympiads(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         await crud.deactivate_all_sessions(session)
 
     AdminActionLogger.log_action(
@@ -162,7 +162,7 @@ async def delete_olympiad_selection(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         sessions = await crud.get_all_sessions(session)
 
         if not sessions:
@@ -194,7 +194,7 @@ async def confirm_delete_olympiad(callback: CallbackQuery):
 
     olympiad_id = int(callback.data.split("_")[2])
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         olympiad = await crud.get_session_by_id(session, olympiad_id)
 
         if not olympiad:
@@ -222,7 +222,7 @@ async def execute_delete_olympiad(callback: CallbackQuery):
 
     olympiad_id = int(callback.data.split("_")[3])
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         olympiad = await crud.get_session_by_id(session, olympiad_id)
 
         if not olympiad:
@@ -261,7 +261,7 @@ async def show_olympiad_stats_selection(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         sessions = await crud.get_all_sessions(session)
 
         if not sessions:
@@ -293,7 +293,7 @@ async def show_olympiad_stats(callback: CallbackQuery):
 
     olympiad_id = int(callback.data.split("_")[2])
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         from sqlalchemy import select, func
         from database.models import Grade8Code, Grade9Code, CodeRequest
 
@@ -381,7 +381,7 @@ async def export_students_csv(callback: CallbackQuery):
 
     await callback.answer("Генерирую CSV файл...", show_alert=False)
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         students = await crud.get_all_students(session)
 
         # Создаем CSV в памяти
@@ -432,7 +432,7 @@ async def export_students_excel(callback: CallbackQuery):
     await callback.answer("Генерирую Excel файл...", show_alert=False)
 
     try:
-        async with get_async_session() as session:
+        async with AsyncSessionLocal() as session:
             students = await crud.get_all_students(session)
 
             students_data = [
@@ -480,7 +480,7 @@ async def export_olympiads_csv(callback: CallbackQuery):
 
     await callback.answer("Генерирую CSV файл...", show_alert=False)
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         sessions = await crud.get_all_sessions(session)
 
         # Создаем CSV
@@ -524,7 +524,7 @@ async def export_stats_excel(callback: CallbackQuery):
     await callback.answer("Генерирую Excel файл...", show_alert=False)
 
     try:
-        async with get_async_session() as session:
+        async with AsyncSessionLocal() as session:
             all_students = await crud.get_all_students(session)
             registered = [s for s in all_students if s.is_registered]
             all_sessions = await crud.get_all_sessions(session)

@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, or_, func, case
 from sqlalchemy.orm import selectinload
 from database.models import (
     Student, OlympiadSession, Grade8Code, Grade9Code,
@@ -74,6 +74,28 @@ async def get_all_students(session: AsyncSession) -> List[Student]:
     """Получает всех учеников"""
     result = await session.execute(select(Student))
     return result.scalars().all()
+
+
+async def get_registered_students(session: AsyncSession) -> List[Student]:
+    """Получает только зарегистрированных учеников"""
+    result = await session.execute(
+        select(Student).where(Student.is_registered == True)
+    )
+    return result.scalars().all()
+
+
+async def get_unregistered_students(session: AsyncSession) -> List[Student]:
+    """Получает только незарегистрированных учеников"""
+    result = await session.execute(
+        select(Student).where(Student.is_registered == False)
+    )
+    return result.scalars().all()
+
+
+async def count_all_students(session: AsyncSession) -> int:
+    """Подсчитывает общее количество учеников без их загрузки"""
+    result = await session.execute(select(func.count(Student.id)))
+    return result.scalar() or 0
 
 
 async def get_student_by_id(
@@ -187,6 +209,60 @@ async def get_all_classes(session: AsyncSession) -> List[int]:
         .order_by(Student.class_number)
     )
     return result.scalars().all()
+
+
+async def get_classes_statistics(session: AsyncSession) -> dict:
+    """
+    Получает статистику по всем классам за один запрос
+
+    Returns:
+        dict: {class_number: {"total": int, "registered": int}}
+    """
+    # Получаем статистику одним запросом с использованием GROUP BY
+    result = await session.execute(
+        select(
+            Student.class_number,
+            func.count(Student.id).label('total'),
+            func.sum(case((Student.is_registered == True, 1), else_=0)).label('registered')
+        )
+        .where(Student.class_number.isnot(None))
+        .group_by(Student.class_number)
+        .order_by(Student.class_number)
+    )
+
+    stats = {}
+    for row in result:
+        stats[row.class_number] = {
+            "total": row.total,
+            "registered": row.registered or 0
+        }
+
+    return stats
+
+
+async def get_students_count_stats(session: AsyncSession) -> dict:
+    """
+    Получает общую статистику по ученикам за один запрос
+
+    Returns:
+        dict: {"total": int, "registered": int, "unregistered": int}
+    """
+    result = await session.execute(
+        select(
+            func.count(Student.id).label('total'),
+            func.sum(case((Student.is_registered == True, 1), else_=0)).label('registered')
+        )
+    )
+    row = result.first()
+
+    total = row.total or 0
+    registered = row.registered or 0
+
+    return {
+        "total": total,
+        "registered": registered,
+        "unregistered": total - registered
+    }
 
 
 # ==================== OLYMPIAD SESSIONS ====================
