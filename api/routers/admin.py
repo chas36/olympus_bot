@@ -93,7 +93,7 @@ async def get_all_students(
             "registration_code": s.registration_code,
             "is_registered": s.is_registered,
             "telegram_id": s.telegram_id,
-            "created_at": s.created_at.isoformat(),
+            "created_at": s.created_at.isoformat() if s.created_at else None,
             "registered_at": s.registered_at.isoformat() if s.registered_at else None
         }
         for s in students
@@ -115,7 +115,7 @@ async def get_unregistered_students(
             "id": s.id,
             "full_name": s.full_name,
             "registration_code": s.registration_code,
-            "created_at": s.created_at.isoformat()
+            "created_at": s.created_at.isoformat() if s.created_at else None
         }
         for s in unregistered
     ]
@@ -188,8 +188,7 @@ async def get_student(
         "registration_code": student.registration_code,
         "is_registered": student.is_registered,
         "telegram_id": student.telegram_id,
-        "telegram_username": student.telegram_username,
-        "created_at": student.created_at.isoformat(),
+        "created_at": student.created_at.isoformat() if student.created_at else None,
         "registered_at": student.registered_at.isoformat() if student.registered_at else None
     }
 
@@ -295,7 +294,7 @@ async def get_students_by_class(
             "registration_code": s.registration_code,
             "is_registered": s.is_registered,
             "telegram_id": s.telegram_id,
-            "created_at": s.created_at.isoformat(),
+            "created_at": s.created_at.isoformat() if s.created_at else None,
             "registered_at": s.registered_at.isoformat() if s.registered_at else None
         }
         for s in students
@@ -364,7 +363,7 @@ async def get_all_olympiads(
             "stage": s.stage,
             "is_active": s.is_active,
             "uploaded_file_name": s.uploaded_file_name,
-            "upload_time": s.upload_time.isoformat()
+            "upload_time": s.upload_time.isoformat() if s.upload_time else None
         }
         for s in sessions
     ]
@@ -431,6 +430,40 @@ async def activate_olympiad(
         "subject": olympiad_session.subject,
         "is_active": olympiad_session.is_active,
         "message": f"Олимпиада '{olympiad_session.subject}' активирована"
+    }
+
+
+@router.post("/olympiads/{session_id}/deactivate")
+async def deactivate_olympiad(
+    session_id: int,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Деактивировать олимпиаду
+    """
+    from sqlalchemy import select, update
+    from database.models import OlympiadSession
+
+    # Проверяем что олимпиада существует
+    result = await session.execute(
+        select(OlympiadSession).where(OlympiadSession.id == session_id)
+    )
+    olympiad_session = result.scalar_one_or_none()
+
+    if not olympiad_session:
+        raise HTTPException(status_code=404, detail="Олимпиада не найдена")
+
+    # Деактивируем олимпиаду
+    olympiad_session.is_active = False
+    await session.commit()
+    await session.refresh(olympiad_session)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "subject": olympiad_session.subject,
+        "is_active": olympiad_session.is_active,
+        "message": f"Олимпиада '{olympiad_session.subject}' деактивирована"
     }
 
 
@@ -603,7 +636,7 @@ async def get_unregistered_students_api(
             "class_number": s.class_number,
             "parallel": s.parallel,
             "registration_code": s.registration_code,
-            "created_at": s.created_at.isoformat()
+            "created_at": s.created_at.isoformat() if s.created_at else None
         }
         for s in students
     ]
@@ -668,7 +701,7 @@ async def export_students_csv(
             s.registration_code,
             "Да" if s.is_registered else "Нет",
             s.telegram_id or "-",
-            s.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            s.created_at.strftime("%Y-%m-%d %H:%M:%S") if s.created_at else "-"
         ])
 
     output.seek(0)
@@ -703,7 +736,7 @@ async def export_students_excel(
             "registration_code": s.registration_code,
             "is_registered": s.is_registered,
             "telegram_id": s.telegram_id,
-            "created_at": s.created_at.isoformat(),
+            "created_at": s.created_at.isoformat() if s.created_at else None,
             "registered_at": s.registered_at.isoformat() if s.registered_at else None
         }
         for s in students
@@ -747,7 +780,7 @@ async def export_olympiads_excel(
             "stage": s.stage,
             "is_active": s.is_active,
             "uploaded_file_name": s.uploaded_file_name,
-            "upload_time": s.upload_time.isoformat()
+            "upload_time": s.upload_time.isoformat() if s.upload_time else None
         }
         for s in sessions
     ]

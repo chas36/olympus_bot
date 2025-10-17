@@ -85,16 +85,28 @@ class CodesCSVParser:
             
             # Собираем коды из всех строк начиная с 3-й (индекс 2)
             codes = []
+            detected_class = None  # Класс, определенный из кодов
+
             for row_idx in range(2, len(rows)):
                 row = rows[row_idx]
-                
+
                 # Проверяем, что в этой строке есть данные для текущего столбца
                 if col_idx < len(row):
                     code = row[col_idx].strip()
-                    
+
                     # Проверяем, что это валидный код
                     if code and self._is_valid_code(code):
                         codes.append(code)
+
+                        # Извлекаем класс из кода (более надежный способ)
+                        if not detected_class:
+                            detected_class = self._extract_class_from_code(code)
+                            if detected_class:
+                                logger.info(f"  Класс определен из кода: {detected_class}")
+
+            # Используем класс из кода, если он был определен
+            if detected_class:
+                class_number = detected_class
             
             logger.info(f"  Найдено кодов для {subject}: {len(codes)}")
             
@@ -119,6 +131,27 @@ class CodesCSVParser:
             '/' in code and
             len(code) > 15
         )
+
+    def _extract_class_from_code(self, code: str) -> Optional[int]:
+        """
+        Извлекает номер класса из кода
+
+        Формат кода: sbma59/sch771584/9/7w4qq8
+        где третий элемент после разделения по '/' - это класс
+        """
+        try:
+            parts = code.split('/')
+            if len(parts) >= 3:
+                # Третий элемент - это класс
+                class_str = parts[2].strip()
+                # Проверяем, что это число от 5 до 11
+                if class_str.isdigit():
+                    class_num = int(class_str)
+                    if 5 <= class_num <= 11:
+                        return class_num
+        except (ValueError, IndexError):
+            pass
+        return None
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """

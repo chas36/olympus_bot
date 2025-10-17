@@ -3,7 +3,7 @@ from sqlalchemy import select, and_, func
 from typing import List, Dict, Tuple
 import logging
 
-from database.models import Student, OlympiadSession, OlympiadCode, DistributionMode
+from database.models import Student, OlympiadSession, OlympiadCode, DistributionMode, Grade8ReserveCode
 
 logger = logging.getLogger(__name__)
 
@@ -223,11 +223,11 @@ class CodeDistributor:
     ) -> OlympiadCode:
         """
         Выдает код ученику в режиме on-demand
-        
+
         Args:
             student_id: ID ученика
             session_id: ID сессии олимпиады
-            
+
         Returns:
             OlympiadCode или None если кодов нет
         """
@@ -236,12 +236,13 @@ class CodeDistributor:
             select(Student).where(Student.id == student_id)
         )
         student = student_result.scalar_one_or_none()
-        
+
         if not student:
             raise ValueError(f"Ученик с ID {student_id} не найден")
-        
+
         class_num = student.class_number
-        
+        parallel = student.parallel
+
         # Ищем свободный код для класса ученика
         code_result = await session.execute(
             select(OlympiadCode).where(
@@ -253,29 +254,54 @@ class CodeDistributor:
             ).limit(1)
         )
         code = code_result.scalar_one_or_none()
-        
-        # Если нет кода для 8 класса, пробуем взять из резерва
+
+        # Если нет кода для 8 класса, пробуем взять резервный код из 9 класса
         if not code and class_num == 8:
+            # Формируем идентификатор параллели (8А, 8И и т.д.)
+            class_parallel = f"8{parallel}" if parallel else "8"
+
+            # Ищем свободный резервный код для этой параллели
             reserve_result = await session.execute(
-                select(OlympiadCode).where(
+                select(Grade8ReserveCode).where(
                     and_(
-                        OlympiadCode.session_id == session_id,
-                        OlympiadCode.is_reserve == True,
-                        OlympiadCode.reserved_for_class == class_num,
-                        OlympiadCode.is_assigned == False
+                        Grade8ReserveCode.session_id == session_id,
+                        Grade8ReserveCode.class_parallel == class_parallel,
+                        Grade8ReserveCode.is_used == False
                     )
                 ).limit(1)
             )
-            code = reserve_result.scalar_one_or_none()
-        
+            reserve_code = reserve_result.scalar_one_or_none()
+
+            if reserve_code:
+                # Помечаем резервный код как использованный
+                from datetime import datetime
+                reserve_code.is_used = True
+                reserve_code.used_by_student_id = student_id
+                reserve_code.used_at = datetime.utcnow()
+
+                # Создаем виртуальный OlympiadCode объект для возврата
+                # (чтобы не ломать интерфейс)
+                code = OlympiadCode(
+                    session_id=session_id,
+                    class_number=class_num,
+                    code=reserve_code.code,
+                    student_id=student_id,
+                    is_assigned=True
+                )
+                # Не добавляем в сессию, так как это резервный код
+                await session.commit()
+
+                logger.info(f"Выдан РЕЗЕРВНЫЙ код {reserve_code.code} (из 9 класса) ученику {student.full_name} ({class_parallel})")
+                return code
+
         if code:
             code.student_id = student_id
             code.is_assigned = True
             await session.commit()
             await session.refresh(code)
-            
+
             logger.info(f"Выдан код {code.code} ученику {student.full_name}")
-        
+
         return code
     
     @staticmethod

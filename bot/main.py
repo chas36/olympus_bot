@@ -10,6 +10,7 @@ from bot.handlers import registration, olympiad, screenshots, admin
 from bot.handlers import admin_extended, admin_olympiads
 from bot.middlewares import LoggingMiddleware, ThrottlingMiddleware
 from tasks.reminders import setup_reminder_scheduler
+from utils.scheduler import send_pending_olympiad_notifications
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -23,6 +24,20 @@ logger.add(
     level="INFO",
     format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
 )
+
+
+async def olympiad_notification_scheduler(bot: Bot):
+    """Планировщик для отложенных уведомлений об олимпиадах"""
+    logger.info("⏰ Запуск планировщика уведомлений об олимпиадах...")
+
+    while True:
+        try:
+            await send_pending_olympiad_notifications(bot)
+        except Exception as e:
+            logger.error(f"❌ Ошибка в планировщике уведомлений: {e}")
+
+        # Проверяем каждую минуту
+        await asyncio.sleep(60)
 
 
 async def main():
@@ -60,11 +75,14 @@ async def main():
     scheduler = setup_reminder_scheduler(bot)
     scheduler.start()
     
-    # Запускаем бота
+    # Запускаем бота и планировщик уведомлений параллельно
     logger.info("🚀 Бот запущен и готов к работе!")
-    
+
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await asyncio.gather(
+            dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()),
+            olympiad_notification_scheduler(bot)
+        )
     finally:
         # Закрытие соединений при остановке
         logger.info("🔄 Остановка бота...")

@@ -8,6 +8,10 @@ function updateTime() {
 setInterval(updateTime, 1000);
 updateTime();
 
+// Глобальные переменные
+let allStudents = [];
+let filteredStudents = [];
+
 // Загрузка при старте
 document.addEventListener('DOMContentLoaded', function() {
     loadDashboard();
@@ -15,7 +19,9 @@ document.addEventListener('DOMContentLoaded', function() {
     loadCodesStats();
     loadSessions();
     loadRecentActivity();
-    
+    loadGlobalNotificationStatus();
+    loadOlympiadNotificationStatus();
+
     // Автообновление каждые 30 секунд
     setInterval(() => {
         loadDashboard();
@@ -152,15 +158,23 @@ async function loadStudentsStats() {
         const response = await fetch('/api/students/stats');
         const data = await response.json();
 
+        // Процент регистрации
+        const registrationPercent = data.total > 0
+            ? Math.round((data.registered / data.total) * 100)
+            : 0;
+
         // Строим статистику по классам
         let byClassHTML = '';
         if (data.by_class && Object.keys(data.by_class).length > 0) {
-            byClassHTML = '<hr><h6>По классам:</h6><div class="row">';
+            byClassHTML = '<hr><h6 class="mb-2">По классам:</h6>';
+            byClassHTML += '<div class="row">';
             Object.entries(data.by_class).forEach(([classNum, count]) => {
                 byClassHTML += `
-                    <div class="col-6 mb-2">
-                        <small class="text-muted">${classNum} класс:</small>
-                        <strong>${count}</strong>
+                    <div class="col-4 mb-2">
+                        <div class="d-flex justify-content-between">
+                            <span class="small">${classNum}:</span>
+                            <strong class="small">${count}</strong>
+                        </div>
                     </div>
                 `;
             });
@@ -168,23 +182,29 @@ async function loadStudentsStats() {
         }
 
         const statsHTML = `
-            <div class="row text-center">
+            <div class="row text-center mb-3">
                 <div class="col-4">
-                    <h2>${data.total}</h2>
+                    <h2 class="mb-1">${data.total}</h2>
                     <small class="text-muted">Всего</small>
                 </div>
                 <div class="col-4">
-                    <h2 class="text-success">${data.registered}</h2>
+                    <h2 class="text-success mb-1">${data.registered}</h2>
                     <small class="text-muted">Зарегистрировано</small>
                 </div>
                 <div class="col-4">
-                    <h2 class="text-warning">${data.not_registered}</h2>
+                    <h2 class="text-warning mb-1">${data.not_registered}</h2>
                     <small class="text-muted">Ожидают</small>
                 </div>
             </div>
+            <div class="progress mb-2" style="height: 20px;">
+                <div class="progress-bar bg-success" style="width: ${registrationPercent}%">
+                    ${registrationPercent}%
+                </div>
+            </div>
+            <p class="text-center text-muted small mb-0">Процент регистрации</p>
             ${byClassHTML}
             <hr>
-            <button class="btn btn-primary w-100" onclick="loadStudentsList()">
+            <button class="btn btn-primary btn-sm w-100" onclick="loadStudentsList()">
                 <i class="bi bi-list"></i> Показать список
             </button>
         `;
@@ -197,39 +217,126 @@ async function loadStudentsStats() {
 
 async function loadStudentsList() {
     try {
-        const response = await fetch('/api/students/');
-        const students = await response.json();
-        
-        const tbody = document.querySelector('#studentsTable tbody');
-        
-        if (students.length === 0) {
-            tbody.innerHTML = `
-                <tr><td colspan="5" class="text-center text-muted">Нет учеников</td></tr>
-            `;
-            return;
-        }
-        
-        const rows = students.map(s => `
-            <tr>
-                <td>${s.id}</td>
-                <td>
-                    ${s.full_name}
-                    ${s.class_display ? `<br><small class="text-muted">${s.class_display}</small>` : ''}
-                </td>
-                <td><code>${s.registration_code}</code></td>
-                <td>
-                    ${s.is_registered
-                        ? '<span class="badge bg-success">Зарегистрирован</span>'
-                        : '<span class="badge bg-warning">Ожидает</span>'}
-                </td>
-                <td>${s.telegram_id || '-'}</td>
-            </tr>
-        `).join('');
-        
-        tbody.innerHTML = rows;
+        // Загружаем всех учеников, включая не зарегистрированных
+        const response = await fetch('/api/students/?include_inactive=true');
+        allStudents = await response.json();
+
+        // Заполняем фильтры
+        populateStudentsFilters();
+
+        // Показываем учеников
+        filteredStudents = allStudents;
+        displayStudents(filteredStudents);
     } catch (error) {
         console.error('Ошибка загрузки списка учеников:', error);
     }
+}
+
+function populateStudentsFilters() {
+    // Собираем уникальные классы и параллели
+    const classes = new Set();
+    const parallels = new Set();
+
+    allStudents.forEach(s => {
+        if (s.class_number) {
+            classes.add(s.class_number);
+            if (s.parallel) {
+                parallels.add(s.parallel);
+            }
+        }
+    });
+
+    // Заполняем селект классов
+    const classSelect = document.getElementById('filterClass');
+    classSelect.innerHTML = '<option value="">Все классы</option>';
+    [...classes].sort((a, b) => a - b).forEach(c => {
+        const option = document.createElement('option');
+        option.value = c;
+        option.textContent = `${c} класс`;
+        classSelect.appendChild(option);
+    });
+
+    // Заполняем селект параллелей
+    const parallelSelect = document.getElementById('filterParallel');
+    parallelSelect.innerHTML = '<option value="">Все параллели</option>';
+    [...parallels].sort().forEach(p => {
+        const option = document.createElement('option');
+        option.value = p;
+        option.textContent = p;
+        parallelSelect.appendChild(option);
+    });
+}
+
+function displayStudents(students) {
+    const tbody = document.querySelector('#studentsTable tbody');
+
+    if (students.length === 0) {
+        tbody.innerHTML = `
+            <tr><td colspan="7" class="text-center text-muted">Нет учеников</td></tr>
+        `;
+        document.getElementById('studentsCount').textContent = '';
+        return;
+    }
+
+    const rows = students.map(s => `
+        <tr>
+            <td>${s.id}</td>
+            <td>${s.full_name}</td>
+            <td>${s.class_display || '-'}</td>
+            <td><code class="small">${s.registration_code}</code></td>
+            <td>
+                ${s.is_registered
+                    ? '<span class="badge bg-success">Зарегистрирован</span>'
+                    : '<span class="badge bg-warning">Ожидает</span>'}
+            </td>
+            <td>${s.telegram_id || '-'}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showEditStudentModal(${s.id})">
+                    <i class="bi bi-pencil"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+
+    tbody.innerHTML = rows;
+    document.getElementById('studentsCount').textContent = `Показано: ${students.length} из ${allStudents.length}`;
+}
+
+function filterStudents() {
+    const classFilter = document.getElementById('filterClass').value;
+    const parallelFilter = document.getElementById('filterParallel').value;
+    const statusFilter = document.getElementById('filterStatus').value;
+
+    filteredStudents = allStudents.filter(s => {
+        // Фильтр по классу
+        if (classFilter && s.class_number != classFilter) {
+            return false;
+        }
+
+        // Фильтр по параллели
+        if (parallelFilter && s.parallel !== parallelFilter) {
+            return false;
+        }
+
+        // Фильтр по статусу
+        if (statusFilter === 'registered' && !s.is_registered) {
+            return false;
+        }
+        if (statusFilter === 'not_registered' && s.is_registered) {
+            return false;
+        }
+
+        return true;
+    });
+
+    displayStudents(filteredStudents);
+}
+
+function resetFilters() {
+    document.getElementById('filterClass').value = '';
+    document.getElementById('filterParallel').value = '';
+    document.getElementById('filterStatus').value = '';
+    filterStudents();
 }
 
 async function uploadStudents() {
@@ -289,45 +396,48 @@ async function loadCodesStats() {
     try {
         const response = await fetch('/api/codes/stats');
         const data = await response.json();
-        
+
+        const grade8 = data.by_class?.grade8 || { total: 0, assigned: 0, unassigned: 0, issued: 0 };
+        const grade8Reserve = data.grade8_reserve || { total: 0, used: 0, available: 0 };
+
         const statsHTML = `
             <h6 class="mb-3">8 класс:</h6>
             <div class="mb-3">
                 <div class="d-flex justify-content-between mb-1">
                     <span>Всего:</span>
-                    <strong>${data.grade8.total}</strong>
+                    <strong>${grade8.total}</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Распределено:</span>
-                    <strong class="text-success">${data.grade8.assigned}</strong>
+                    <strong class="text-success">${grade8.assigned}</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Не распределено:</span>
-                    <strong class="text-warning">${data.grade8.unassigned}</strong>
+                    <strong class="text-warning">${grade8.unassigned}</strong>
                 </div>
                 <div class="d-flex justify-content-between">
                     <span>Выдано:</span>
-                    <strong class="text-info">${data.grade8.issued}</strong>
+                    <strong class="text-info">${grade8.issued}</strong>
                 </div>
             </div>
-            
-            <h6 class="mb-3">9 класс (резерв):</h6>
+
+            <h6 class="mb-3">Резерв 8 класса (из 9 класса):</h6>
             <div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Всего:</span>
-                    <strong>${data.grade9.total}</strong>
+                    <strong>${grade8Reserve.total}</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span>Использовано:</span>
-                    <strong class="text-danger">${data.grade9.used}</strong>
+                    <strong class="text-danger">${grade8Reserve.used}</strong>
                 </div>
                 <div class="d-flex justify-content-between">
                     <span>Доступно:</span>
-                    <strong class="text-success">${data.grade9.available}</strong>
+                    <strong class="text-success">${grade8Reserve.available}</strong>
                 </div>
             </div>
         `;
-        
+
         document.getElementById('codesStats').innerHTML = statsHTML;
     } catch (error) {
         console.error('Ошибка загрузки статистики кодов:', error);
@@ -457,11 +567,16 @@ async function loadSessions() {
                                         : '<span class="badge bg-secondary">Неактивна</span>'}
                                 </td>
                                 <td>
-                                    ${!s.is_active
-                                        ? `<button class="btn btn-sm btn-primary" onclick="activateSession(${s.id})">
-                                            <i class="bi bi-play"></i> Активировать
+                                    ${s.is_active
+                                        ? `<button class="btn btn-sm btn-danger" onclick="deactivateSession(${s.id})">
+                                            <i class="bi bi-pause-circle"></i> Деактивировать
                                            </button>`
-                                        : '<button class="btn btn-sm btn-secondary" disabled>Активна</button>'}
+                                        : `<button class="btn btn-sm btn-primary" onclick="activateSession(${s.id})">
+                                            <i class="bi bi-play"></i> Активировать
+                                           </button>`}
+                                    <button class="btn btn-sm btn-warning" onclick="distributeSessionCodes(${s.id})">
+                                        <i class="bi bi-arrow-down-up"></i> Распределить
+                                    </button>
                                     <a href="/api/codes/export/session/${s.id}" class="btn btn-sm btn-info">
                                         <i class="bi bi-download"></i> Экспорт
                                     </a>
@@ -483,14 +598,14 @@ async function activateSession(sessionId) {
     if (!confirm('Активировать эту сессию? Текущая активная сессия будет деактивирована.')) {
         return;
     }
-    
+
     try {
         const response = await fetch(`/api/codes/sessions/${sessionId}/activate`, {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             alert('Сессия активирована!');
             loadSessions();
@@ -501,45 +616,201 @@ async function activateSession(sessionId) {
     }
 }
 
+async function deactivateSession(sessionId) {
+    if (!confirm('Деактивировать эту сессию?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/olympiads/${sessionId}/deactivate`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Сессия деактивирована!');
+            loadSessions();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка деактивации: ' + error.message);
+    }
+}
+
+async function distributeSessionCodes(sessionId) {
+    if (!confirm('Распределить коды этой сессии между всеми учениками?\n\nКоды будут распределены по классам и параллелям между ВСЕМИ учениками (не только зарегистрированными).')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/codes/sessions/${sessionId}/distribute`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            let message = `✅ ${result.message}\n\nДетали распределения:\n`;
+            if (result.distribution_log && result.distribution_log.length > 0) {
+                result.distribution_log.forEach(log => {
+                    message += `\n${log.class}: ${log.codes_assigned} кодов из ${log.students} учеников`;
+                });
+            }
+            alert(message);
+            loadSessions();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка распределения: ' + error.message);
+    }
+}
+
 // ==================== МОНИТОРИНГ ====================
 
-async function loadStudentsWithoutCodes() {
+async function loadAllOlympiads() {
     try {
-        const response = await fetch('/api/monitoring/students-without-codes');
+        const response = await fetch('/api/monitoring/all-sessions');
         const data = await response.json();
-        
-        if (data.students.length === 0) {
-            document.getElementById('studentsWithoutCodes').innerHTML = `
-                <div class="alert alert-success mb-0">
-                    <i class="bi bi-check-circle"></i> Все ученики получили коды!
+
+        const tbody = document.querySelector('#allOlympiadsTable tbody');
+
+        if (data.sessions.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="9" class="text-center text-muted">Нет олимпиад</td></tr>
+            `;
+            return;
+        }
+
+        const rows = data.sessions.map(s => {
+            const date = new Date(s.date);
+            const dateStr = isNaN(date.getTime()) ? 'Дата не указана' : date.toLocaleDateString('ru-RU');
+
+            return `
+                <tr>
+                    <td>${s.id}</td>
+                    <td><strong>${s.subject}</strong></td>
+                    <td>${dateStr}</td>
+                    <td>${s.stage || '-'}</td>
+                    <td>${s.class_number || '-'}</td>
+                    <td>
+                        ${s.is_active
+                            ? '<span class="badge bg-success">Активна</span>'
+                            : '<span class="badge bg-secondary">Неактивна</span>'}
+                    </td>
+                    <td>
+                        <span class="badge bg-info">${s.issued_codes}/${s.total_codes}</span>
+                    </td>
+                    <td>
+                        <span class="badge bg-primary">${s.code_requests}</span>
+                    </td>
+                    <td>
+                        <span class="badge bg-success">${s.screenshots}</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.innerHTML = rows;
+    } catch (error) {
+        console.error('Ошибка загрузки всех олимпиад:', error);
+    }
+}
+
+async function loadActiveOlympiadParticipants() {
+    try {
+        const response = await fetch('/api/monitoring/active-session/participants');
+        const data = await response.json();
+
+        const container = document.getElementById('activeOlympiadParticipants');
+
+        if (!data.session) {
+            container.innerHTML = `
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> Нет активной олимпиады
                 </div>
             `;
             return;
         }
-        
-        const html = `
-            <p><strong>Олимпиада:</strong> ${data.session}</p>
-            <p><strong>Учеников без кодов:</strong> ${data.count}</p>
+
+        const sessionDate = new Date(data.session.date);
+        const sessionDateStr = isNaN(sessionDate.getTime()) ? 'Дата не указана' : sessionDate.toLocaleDateString('ru-RU');
+
+        let html = `
+            <h4>${data.session.subject}</h4>
+            <p class="text-muted">
+                ${sessionDateStr}
+                ${data.session.stage ? `• ${data.session.stage}` : ''}
+            </p>
             <hr>
-            <div class="list-group">
-                ${data.students.map(s => `
-                    <div class="list-group-item">
-                        <i class="bi bi-person"></i> ${s.full_name}
-                        ${s.telegram_id ? '<span class="badge bg-info ms-2">В боте</span>' : ''}
-                    </div>
-                `).join('')}
-            </div>
+            <p><strong>Участников:</strong> ${data.total_participants}</p>
         `;
-        
-        document.getElementById('studentsWithoutCodes').innerHTML = html;
+
+        if (data.participants.length === 0) {
+            html += `
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Пока нет участников
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>ФИО</th>
+                                <th>Класс</th>
+                                <th>Время запроса</th>
+                                <th>Код</th>
+                                <th>Скриншот</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.participants.map(p => {
+                                const requestedAt = new Date(p.requested_at);
+                                const requestedTimeStr = requestedAt.toLocaleTimeString('ru-RU');
+
+                                return `
+                                    <tr>
+                                        <td>${p.full_name}</td>
+                                        <td>${p.class_display}</td>
+                                        <td><small>${requestedTimeStr}</small></td>
+                                        <td><code class="small">${p.code}</code></td>
+                                        <td>
+                                            ${p.screenshot_submitted
+                                                ? '<span class="badge bg-success"><i class="bi bi-check"></i> Да</span>'
+                                                : '<span class="badge bg-warning"><i class="bi bi-clock"></i> Нет</span>'}
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
     } catch (error) {
-        console.error('Ошибка загрузки учеников без кодов:', error);
+        console.error('Ошибка загрузки участников:', error);
     }
 }
 
 // Загружаем при переключении на таб мониторинга
 document.querySelector('button[data-bs-target="#monitoring-tab"]').addEventListener('click', () => {
-    loadStudentsWithoutCodes();
+    loadAllOlympiads();
+    loadActiveOlympiadParticipants();
+});
+
+// Загружаем при переключении на таб учеников
+document.querySelector('button[data-bs-target="#students-tab"]').addEventListener('click', () => {
+    if (allStudents.length === 0) {
+        loadStudentsList();
+    }
 });
 
 // ==================== РЕГИСТРАЦИЯ ====================
@@ -591,7 +862,7 @@ async function loadClassesData() {
                                 <td><strong>${c.display}</strong></td>
                                 <td>${c.students_count}</td>
                                 <td>
-                                    <a href="/api/students/export/registration-codes?class_number=${c.class_number}${c.parallel ? '&parallel=' + c.parallel : ''}"
+                                    <a href="/api/students/export/registration-codes?class_number=${c.class_number}${c.parallel ? '&parallel=' + encodeURIComponent(c.parallel) : ''}"
                                        class="btn btn-sm btn-success">
                                         <i class="bi bi-download"></i> Экспорт
                                     </a>
@@ -639,7 +910,7 @@ function exportRegistrationCodes() {
 
     let url = '/api/students/export/registration-codes?';
     if (classNum) url += `class_number=${classNum}&`;
-    if (parallel) url += `parallel=${parallel}&`;
+    if (parallel) url += `parallel=${encodeURIComponent(parallel)}&`;
 
     window.location.href = url;
 }
@@ -917,6 +1188,7 @@ function loadOlympiadInfo() {
 
     if (!selectedOption.value) {
         document.getElementById('olympiadInfo').innerHTML = '';
+        document.getElementById('olympiadActionButtons').innerHTML = '';
         return;
     }
 
@@ -932,6 +1204,27 @@ function loadOlympiadInfo() {
                 : '<span class="badge bg-secondary">Неактивна</span>'}
         </div>
     `;
+
+    // Показываем кнопки в зависимости от статуса
+    if (olympiad.is_active) {
+        document.getElementById('olympiadActionButtons').innerHTML = `
+            <button class="btn btn-warning w-100 mb-2" onclick="deactivateOlympiad()">
+                <i class="bi bi-pause-circle"></i> Деактивировать
+            </button>
+            <button class="btn btn-danger w-100 mb-2" onclick="deleteOlympiad()">
+                <i class="bi bi-trash"></i> Удалить олимпиаду
+            </button>
+        `;
+    } else {
+        document.getElementById('olympiadActionButtons').innerHTML = `
+            <button class="btn btn-success w-100 mb-2" onclick="activateOlympiad()">
+                <i class="bi bi-check-circle"></i> Активировать
+            </button>
+            <button class="btn btn-danger w-100 mb-2" onclick="deleteOlympiad()">
+                <i class="bi bi-trash"></i> Удалить олимпиаду
+            </button>
+        `;
+    }
 }
 
 // Активация олимпиады
@@ -966,6 +1259,38 @@ async function activateOlympiad() {
     }
 }
 
+// Деактивация олимпиады
+async function deactivateOlympiad() {
+    const olympiadId = document.getElementById('olympiadSelect').value;
+    if (!olympiadId) {
+        alert('Выберите олимпиаду');
+        return;
+    }
+
+    if (!confirm('Деактивировать эту олимпиаду?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/admin/olympiads/${olympiadId}/deactivate`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('✅ Олимпиада деактивирована!');
+            loadManagementData();
+            loadOlympiadInfo();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка деактивации: ' + error.message);
+    }
+}
+
 // Удаление олимпиады
 async function deleteOlympiad() {
     const olympiadId = document.getElementById('olympiadSelect').value;
@@ -989,6 +1314,7 @@ async function deleteOlympiad() {
             alert('✅ Олимпиада удалена');
             document.getElementById('olympiadSelect').value = '';
             document.getElementById('olympiadInfo').innerHTML = '';
+            document.getElementById('olympiadActionButtons').innerHTML = '';
             loadManagementData();
             loadDashboard();
         } else {
@@ -998,3 +1324,647 @@ async function deleteOlympiad() {
         alert('❌ Ошибка удаления: ' + error.message);
     }
 }
+
+// Удаление всех олимпиад
+async function deleteAllOlympiads() {
+    if (!confirm('⚠️⚠️⚠️ ВЫ УВЕРЕНЫ?\n\nЭто действие удалит ВСЕ олимпиады и все связанные коды!\nЭто действие НЕОБРАТИМО!')) {
+        return;
+    }
+
+    if (!confirm('Последнее предупреждение!\nВы действительно хотите удалить ВСЕ олимпиады?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/admin/olympiads', {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✅ Удалено олимпиад: ${result.deleted_count}`);
+            document.getElementById('olympiadSelect').value = '';
+            document.getElementById('olympiadInfo').innerHTML = '';
+            document.getElementById('olympiadActionButtons').innerHTML = '';
+            loadManagementData();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка удаления: ' + error.message);
+    }
+}
+
+// ==================== УВЕДОМЛЕНИЯ ====================
+
+// Загрузка статуса глобальных уведомлений
+async function loadGlobalNotificationStatus() {
+    try {
+        const response = await fetch('/api/notifications/global');
+        const data = await response.json();
+
+        const switchElement = document.getElementById('globalNotificationsSwitch');
+        if (switchElement) {
+            switchElement.checked = data.notifications_enabled;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки статуса уведомлений:', error);
+    }
+}
+
+// Загрузка статуса уведомлений об олимпиадах
+async function loadOlympiadNotificationStatus() {
+    try {
+        const response = await fetch('/api/notifications/olympiad/status');
+        const data = await response.json();
+
+        const switchElement = document.getElementById('olympiadNotificationsSwitch');
+        if (switchElement) {
+            switchElement.checked = data.olympiad_notifications_enabled;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки статуса уведомлений об олимпиадах:', error);
+    }
+}
+
+// Переключить глобальные уведомления через переключатель
+async function toggleGlobalNotifications(enabled) {
+    try {
+        const response = await fetch('/api/notifications/global', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ notifications_enabled: enabled })
+        });
+
+        const result = await response.json();
+
+        if (result.notifications_enabled === enabled) {
+            const status = enabled ? 'включены' : 'отключены';
+            console.log(`Глобальные уведомления ${status}`);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+        // Возвращаем переключатель в предыдущее состояние
+        document.getElementById('globalNotificationsSwitch').checked = !enabled;
+    }
+}
+
+// Переключить уведомления об олимпиадах через переключатель
+async function toggleOlympiadNotifications(enabled) {
+    try {
+        const endpoint = enabled ? '/api/notifications/olympiad/enable' : '/api/notifications/olympiad/disable';
+        const response = await fetch(endpoint, {
+            method: 'PUT'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            const status = enabled ? 'включены' : 'отключены';
+            console.log(`Уведомления об олимпиадах ${status}`);
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+        // Возвращаем переключатель в предыдущее состояние
+        document.getElementById('olympiadNotificationsSwitch').checked = !enabled;
+    }
+}
+
+// Включить глобальные уведомления
+async function enableGlobalNotifications() {
+    try {
+        const response = await fetch('/api/notifications/global', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ notifications_enabled: true })
+        });
+
+        const result = await response.json();
+
+        if (result.notifications_enabled) {
+            alert('✅ Глобальные уведомления включены');
+            loadGlobalNotificationStatus();
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Отключить глобальные уведомления
+async function disableGlobalNotifications() {
+    if (!confirm('⚠️ Вы уверены? Все уведомления администратору будут отключены.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notifications/global', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ notifications_enabled: false })
+        });
+
+        const result = await response.json();
+
+        if (!result.notifications_enabled) {
+            alert('✅ Глобальные уведомления отключены');
+            loadGlobalNotificationStatus();
+        }
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Проверить статус уведомлений ученика
+async function checkStudentNotifications() {
+    const studentId = document.getElementById('studentNotificationId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/notifications/student/${studentId}`);
+
+        if (!response.ok) {
+            throw new Error('Ученик не найден');
+        }
+
+        const data = await response.json();
+
+        const statusHtml = `
+            <div class="alert ${data.notifications_enabled ? 'alert-success' : 'alert-warning'}">
+                <strong>Ученик:</strong> ${data.full_name}<br>
+                <strong>Статус уведомлений:</strong>
+                ${data.notifications_enabled
+                    ? '<span class="badge bg-success">Включены</span>'
+                    : '<span class="badge bg-warning">Отключены</span>'}
+            </div>
+        `;
+
+        document.getElementById('studentNotificationInfo').innerHTML = statusHtml;
+    } catch (error) {
+        document.getElementById('studentNotificationInfo').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> ${error.message}
+            </div>
+        `;
+    }
+}
+
+// Включить уведомления для ученика
+async function enableStudentNotifications() {
+    const studentId = document.getElementById('studentNotificationId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/notifications/student/${studentId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                student_id: parseInt(studentId),
+                notifications_enabled: true
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Ученик не найден');
+        }
+
+        const result = await response.json();
+        alert('✅ ' + result.message);
+        checkStudentNotifications();
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Отключить уведомления для ученика
+async function disableStudentNotifications() {
+    const studentId = document.getElementById('studentNotificationId').value;
+    if (!studentId) {
+        alert('Введите ID ученика');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/notifications/student/${studentId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                student_id: parseInt(studentId),
+                notifications_enabled: false
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Ученик не найден');
+        }
+
+        const result = await response.json();
+        alert('✅ ' + result.message);
+        checkStudentNotifications();
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Включить уведомления для ВСЕХ учеников
+async function enableAllStudentsNotifications() {
+    if (!confirm('Включить уведомления для ВСЕХ учеников?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notifications/students/all?notifications_enabled=true', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        alert(`✅ ${result.message}`);
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Отключить уведомления для ВСЕХ учеников
+async function disableAllStudentsNotifications() {
+    if (!confirm('⚠️ Вы уверены?\nЭто отключит уведомления для ВСЕХ учеников в системе!')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/notifications/students/all?notifications_enabled=false', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+        alert(`✅ ${result.message}`);
+    } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+    }
+}
+
+// Загружаем статус уведомлений при инициализации
+document.addEventListener('DOMContentLoaded', function() {
+    loadGlobalNotificationStatus();
+});
+
+// ==================== УПРАВЛЕНИЕ УЧЕНИКАМИ ====================
+
+function showAddStudentModal() {
+    // Очищаем форму
+    document.getElementById('addStudentName').value = '';
+    document.getElementById('addStudentClass').value = '';
+    document.getElementById('addStudentParallel').value = '';
+
+    // Показываем модальное окно
+    const modal = new bootstrap.Modal(document.getElementById('addStudentModal'));
+    modal.show();
+}
+
+async function createStudent() {
+    const fullName = document.getElementById('addStudentName').value.trim();
+    const classNumber = document.getElementById('addStudentClass').value;
+    const parallel = document.getElementById('addStudentParallel').value.trim();
+
+    if (!fullName) {
+        alert('Введите ФИО ученика');
+        return;
+    }
+
+    const data = {
+        full_name: fullName
+    };
+
+    if (classNumber) {
+        data.class_number = parseInt(classNumber);
+    }
+
+    if (parallel) {
+        data.parallel = parallel;
+    }
+
+    try {
+        const response = await fetch('/api/students/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            alert(`✅ Ученик создан!\n\nИмя: ${result.student.full_name}\nКод: ${result.student.registration_code}\nКласс: ${result.student.class_display || 'Не указан'}`);
+
+            // Закрываем модальное окно
+            bootstrap.Modal.getInstance(document.getElementById('addStudentModal')).hide();
+
+            // Перезагружаем список учеников
+            loadStudentsList();
+            loadStudentsStats();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.detail || result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка создания ученика: ' + error.message);
+    }
+}
+
+async function showEditStudentModal(studentId) {
+    try {
+        // Загружаем данные ученика
+        const response = await fetch(`/api/students/${studentId}`);
+        const student = await response.json();
+
+        if (!response.ok) {
+            throw new Error(student.detail || 'Ученик не найден');
+        }
+
+        // Заполняем форму
+        document.getElementById('editStudentId').value = student.id;
+        document.getElementById('editStudentName').value = student.full_name;
+        document.getElementById('editStudentClass').value = student.class_number || '';
+        document.getElementById('editStudentParallel').value = student.parallel || '';
+
+        // Показываем модальное окно
+        const modal = new bootstrap.Modal(document.getElementById('editStudentModal'));
+        modal.show();
+    } catch (error) {
+        alert('❌ Ошибка загрузки данных ученика: ' + error.message);
+    }
+}
+
+async function updateStudent() {
+    const studentId = document.getElementById('editStudentId').value;
+    const fullName = document.getElementById('editStudentName').value.trim();
+    const classNumber = document.getElementById('editStudentClass').value;
+    const parallel = document.getElementById('editStudentParallel').value.trim();
+
+    if (!fullName) {
+        alert('Введите ФИО ученика');
+        return;
+    }
+
+    const data = {
+        full_name: fullName
+    };
+
+    if (classNumber) {
+        data.class_number = parseInt(classNumber);
+    } else {
+        data.class_number = null;
+    }
+
+    if (parallel) {
+        data.parallel = parallel;
+    } else {
+        data.parallel = null;
+    }
+
+    try {
+        const response = await fetch(`/api/students/${studentId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            alert(`✅ ${result.message}\n\nИмя: ${result.student.full_name}\nКласс: ${result.student.class_display || 'Не указан'}`);
+
+            // Закрываем модальное окно
+            bootstrap.Modal.getInstance(document.getElementById('editStudentModal')).hide();
+
+            // Перезагружаем список учеников
+            loadStudentsList();
+            loadStudentsStats();
+            loadDashboard();
+        } else {
+            alert('❌ Ошибка: ' + (result.detail || result.message || 'Неизвестная ошибка'));
+        }
+    } catch (error) {
+        alert('❌ Ошибка обновления ученика: ' + error.message);
+    }
+}
+
+// ==================== СКРИНШОТЫ ====================
+
+let allScreenshots = [];
+
+// Загрузка статистики скриншотов
+async function loadScreenshotsStats() {
+    try {
+        const response = await fetch('/api/screenshots/stats');
+        const data = await response.json();
+
+        const statsHTML = `
+            <div class="col-md-4">
+                <div class="card stat-card success">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-check-circle"></i> Отправлено</h6>
+                        <h2 class="mb-0">${data.total_submitted}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card warning">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-hourglass"></i> Ожидается</h6>
+                        <h2 class="mb-0">${data.total_expected}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card info">
+                    <div class="card-body">
+                        <h6 class="text-muted mb-2"><i class="bi bi-percent"></i> Процент отправки</h6>
+                        <h2 class="mb-0">${data.submission_rate}%</h2>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('screenshotsStatsCards').innerHTML = statsHTML;
+    } catch (error) {
+        console.error('Ошибка загрузки статистики скриншотов:', error);
+    }
+}
+
+// Загрузка списка скриншотов
+async function loadScreenshots() {
+    try {
+        const response = await fetch('/api/screenshots/list');
+        allScreenshots = await response.json();
+
+        // Заполняем фильтры
+        populateScreenshotFilters();
+
+        // Показываем скриншоты
+        filterScreenshots();
+    } catch (error) {
+        console.error('Ошибка загрузки скриншотов:', error);
+        document.getElementById('screenshotsList').innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Ошибка загрузки скриншотов
+                </div>
+            </div>
+        `;
+    }
+}
+
+// Заполнение фильтров
+function populateScreenshotFilters() {
+    // Уникальные предметы
+    const subjects = [...new Set(allScreenshots.map(s => s.subject))];
+    const subjectFilter = document.getElementById('screenshotSubjectFilter');
+    subjectFilter.innerHTML = '<option value="">Все предметы</option>';
+    subjects.forEach(subject => {
+        subjectFilter.innerHTML += `<option value="${subject}">${subject}</option>`;
+    });
+
+    // Уникальные сессии
+    const sessions = [...new Map(allScreenshots.map(s => [s.session_id, s])).values()];
+    const sessionFilter = document.getElementById('screenshotSessionFilter');
+    sessionFilter.innerHTML = '<option value="">Все сессии</option>';
+    sessions.forEach(s => {
+        const date = s.olympiad_date ? new Date(s.olympiad_date).toLocaleDateString('ru-RU') : 'Не указана';
+        sessionFilter.innerHTML += `<option value="${s.session_id}">${s.subject} - ${date}</option>`;
+    });
+}
+
+// Фильтрация скриншотов
+function filterScreenshots() {
+    const subjectFilter = document.getElementById('screenshotSubjectFilter').value;
+    const classFilter = document.getElementById('screenshotClassFilter').value;
+    const sessionFilter = document.getElementById('screenshotSessionFilter').value;
+
+    let filtered = allScreenshots;
+
+    if (subjectFilter) {
+        filtered = filtered.filter(s => s.subject === subjectFilter);
+    }
+
+    if (classFilter) {
+        filtered = filtered.filter(s => s.student_class.startsWith(classFilter));
+    }
+
+    if (sessionFilter) {
+        filtered = filtered.filter(s => s.session_id == sessionFilter);
+    }
+
+    displayScreenshots(filtered);
+}
+
+// Отображение скриншотов
+function displayScreenshots(screenshots) {
+    document.getElementById('screenshotsCount').textContent = screenshots.length;
+
+    if (screenshots.length === 0) {
+        document.getElementById('screenshotsList').innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Скриншоты не найдены
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    screenshots.forEach(screenshot => {
+        const date = new Date(screenshot.submitted_at).toLocaleString('ru-RU');
+        const fileExistsIcon = screenshot.file_exists
+            ? '<i class="bi bi-check-circle text-success"></i>'
+            : '<i class="bi bi-x-circle text-danger"></i>';
+
+        html += `
+            <div class="col-md-4 col-lg-3 mb-3">
+                <div class="card h-100">
+                    <div class="card-header bg-light">
+                        <small class="text-muted">${screenshot.subject}</small>
+                    </div>
+                    <div class="card-body">
+                        <h6 class="card-title">${screenshot.student_name}</h6>
+                        <p class="card-text">
+                            <small>
+                                <i class="bi bi-mortarboard"></i> Класс: ${screenshot.student_class}<br>
+                                <i class="bi bi-calendar"></i> ${date}<br>
+                                ${fileExistsIcon} Файл ${screenshot.file_exists ? 'доступен' : 'не найден'}
+                            </small>
+                        </p>
+                    </div>
+                    <div class="card-footer bg-transparent">
+                        ${screenshot.file_exists
+                            ? `<button class="btn btn-sm btn-primary w-100" onclick="viewScreenshot(${screenshot.id}, '${screenshot.student_name}', '${screenshot.subject}')">
+                                <i class="bi bi-eye"></i> Просмотреть
+                               </button>`
+                            : '<button class="btn btn-sm btn-secondary w-100" disabled>Файл недоступен</button>'
+                        }
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    document.getElementById('screenshotsList').innerHTML = html;
+}
+
+// Просмотр скриншота
+function viewScreenshot(requestId, studentName, subject) {
+    const modalTitle = document.getElementById('screenshotModalTitle');
+    const modalImage = document.getElementById('screenshotModalImage');
+    const modalInfo = document.getElementById('screenshotModalInfo');
+
+    modalTitle.textContent = `${studentName} - ${subject}`;
+    modalImage.src = `/api/screenshots/view/${requestId}`;
+
+    const screenshot = allScreenshots.find(s => s.id === requestId);
+    if (screenshot) {
+        const date = new Date(screenshot.submitted_at).toLocaleString('ru-RU');
+        modalInfo.innerHTML = `
+            <div class="text-start">
+                <p><strong>Ученик:</strong> ${screenshot.student_name}</p>
+                <p><strong>Класс:</strong> ${screenshot.student_class}</p>
+                <p><strong>Предмет:</strong> ${screenshot.subject}</p>
+                <p><strong>Дата отправки:</strong> ${date}</p>
+            </div>
+        `;
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('screenshotModal'));
+    modal.show();
+}
+
+// Загрузка при открытии вкладки скриншотов
+document.querySelector('[data-bs-target="#screenshots-tab"]').addEventListener('click', function() {
+    loadScreenshotsStats();
+    loadScreenshots();
+});
