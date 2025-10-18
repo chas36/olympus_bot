@@ -271,14 +271,23 @@ async def notify_students_olympiad_activated(bot: Bot, session_id: int, subject:
         return
 
     available_class_numbers = [c[0] for c in available_classes]
-    logger.info(f"Олимпиада '{subject}' доступна для классов: {available_class_numbers}")
+    logger.info(f"Олимпиада '{subject}' имеет коды для классов: {available_class_numbers}")
 
-    # Получаем учеников только тех классов, для которых есть коды
+    # Определяем минимальный класс с кодами
+    min_available_class = min(available_class_numbers)
+
+    # ВАЖНО: Благодаря каскадной системе, ученики младших классов тоже могут получить код
+    # Например, если коды есть для 7, 8, 9 классов, то и 5, 6 классники тоже могут писать за 7 класс
+    # Поэтому отправляем уведомления всем классам от 5 до максимального доступного
+    logger.info(f"Уведомления будут отправлены ученикам от 5 до 11 класса (минимальный доступный: {min_available_class})")
+
+    # Получаем всех зарегистрированных учеников с 5 по 11 класс
     students = db.query(Student).filter(
         Student.is_registered == True,
         Student.notifications_enabled == True,
         Student.telegram_id.isnot(None),
-        Student.class_number.in_(available_class_numbers)
+        Student.class_number >= 5,
+        Student.class_number <= 11
     ).all()
 
     if not students:

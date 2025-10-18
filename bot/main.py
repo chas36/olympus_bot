@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from database.database import init_db, close_db
-from bot.handlers import registration, olympiad, screenshots, admin
+from bot.handlers import registration, olympiad, screenshots, admin, auth
 from bot.handlers import admin_extended, admin_olympiads
 from bot.middlewares import LoggingMiddleware, ThrottlingMiddleware
 from tasks.reminders import setup_reminder_scheduler
@@ -59,7 +59,8 @@ async def main():
     dp.message.middleware(ThrottlingMiddleware(rate_limit=1))
     
     # Регистрируем роутеры
-    dp.include_router(admin.router)  # Админ роутер первым для приоритета
+    dp.include_router(auth.router)  # Авторизация первой для deep links
+    dp.include_router(admin.router)  # Админ роутер
     dp.include_router(admin_extended.router)  # Расширенные админ функции
     dp.include_router(admin_olympiads.router)  # Управление олимпиадами и экспорт
     dp.include_router(registration.router)

@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, FSInputFile, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from database.database import get_async_session
+from database.database import AsyncSessionLocal
 from database import crud
 from bot.keyboards import (
     get_students_management_menu, get_classes_management_menu,
@@ -106,7 +106,7 @@ async def show_all_students(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         students = await crud.get_all_students(session)
 
         if not students:
@@ -149,9 +149,9 @@ async def show_registered_students(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
-        all_students = await crud.get_all_students(session)
-        students = [s for s in all_students if s.is_registered]
+    async with AsyncSessionLocal() as session:
+        # Получаем только зарегистрированных студентов напрямую из БД
+        students = await crud.get_registered_students(session)
 
         if not students:
             await callback.message.edit_text(
@@ -184,9 +184,9 @@ async def show_unregistered_students(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
-        all_students = await crud.get_all_students(session)
-        students = [s for s in all_students if not s.is_registered]
+    async with AsyncSessionLocal() as session:
+        # Получаем только незарегистрированных студентов напрямую из БД
+        students = await crud.get_unregistered_students(session)
 
         if not students:
             await callback.message.edit_text(
@@ -254,9 +254,9 @@ async def confirm_clear_all_students(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
-        students = await crud.get_all_students(session)
-        count = len(students)
+    async with AsyncSessionLocal() as session:
+        # Подсчитываем студентов без их загрузки
+        count = await crud.count_all_students(session)
 
     await callback.message.edit_text(
         f"⚠️ <b>ВНИМАНИЕ!</b>\n\n"
@@ -275,7 +275,7 @@ async def execute_clear_all_students(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         count = await crud.clear_all_students(session)
 
     AdminActionLogger.log_action(
@@ -310,10 +310,11 @@ async def show_classes_list(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
-        classes = await crud.get_all_classes(session)
+    async with AsyncSessionLocal() as session:
+        # Получаем статистику одним запросом вместо N+1
+        stats = await crud.get_classes_statistics(session)
 
-        if not classes:
+        if not stats:
             await callback.message.edit_text(
                 "📝 В базе данных нет классов",
                 reply_markup=get_classes_management_menu()
@@ -322,10 +323,8 @@ async def show_classes_list(callback: CallbackQuery):
 
         text = "🎓 <b>Список классов:</b>\n\n"
 
-        for class_num in classes:
-            students = await crud.get_students_by_class(session, class_num)
-            registered = sum(1 for s in students if s.is_registered)
-            text += f"<b>{class_num} класс:</b> {len(students)} уч. ({registered} зарег.)\n"
+        for class_num, data in stats.items():
+            text += f"<b>{class_num} класс:</b> {data['total']} уч. ({data['registered']} зарег.)\n"
 
     await callback.message.edit_text(
         text,
@@ -341,7 +340,7 @@ async def show_class_students_selection(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         classes = await crud.get_all_classes(session)
 
         if not classes:
@@ -368,7 +367,7 @@ async def show_class_students(callback: CallbackQuery):
 
     class_number = int(callback.data.split("_")[2])
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         students = await crud.get_students_by_class(session, class_number)
 
         if not students:
@@ -377,7 +376,8 @@ async def show_class_students(callback: CallbackQuery):
 
         text = f"👥 <b>{class_number} класс ({len(students)} уч.)</b>\n\n"
 
-        for student in students:
+        # Показываем первые 30 учеников
+        for student in students[:30]:
             status = "✅" if student.is_registered else "❌"
             text += f"{status} <b>{student.full_name}</b>\n"
 
@@ -387,6 +387,9 @@ async def show_class_students(callback: CallbackQuery):
                 text += f"   Код: <code>{student.registration_code}</code>\n"
 
             text += "\n"
+
+        if len(students) > 30:
+            text += f"\n... и еще {len(students) - 30} учеников"
 
     await callback.message.edit_text(
         text,
@@ -402,7 +405,7 @@ async def delete_class_selection(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         classes = await crud.get_all_classes(session)
 
         if not classes:

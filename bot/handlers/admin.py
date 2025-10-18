@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.database import get_async_session
+from database.database import AsyncSessionLocal
 from database import crud
 from bot.keyboards import get_admin_main_menu
 import os
@@ -57,18 +57,17 @@ async def show_statistics(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
-        # Получаем статистику
-        all_students = await crud.get_all_students(session)
-        registered_students = [s for s in all_students if s.is_registered]
+    async with AsyncSessionLocal() as session:
+        # Получаем статистику одним запросом вместо загрузки всех студентов
+        student_stats = await crud.get_students_count_stats(session)
         all_sessions = await crud.get_all_sessions(session)
         active_session = await crud.get_active_session(session)
 
         stats_text = (
             "📊 Статистика системы\n\n"
-            f"👥 Всего учеников: {len(all_students)}\n"
-            f"✅ Зарегистрированных: {len(registered_students)}\n"
-            f"❌ Не зарегистрированных: {len(all_students) - len(registered_students)}\n\n"
+            f"👥 Всего учеников: {student_stats['total']}\n"
+            f"✅ Зарегистрированных: {student_stats['registered']}\n"
+            f"❌ Не зарегистрированных: {student_stats['unregistered']}\n\n"
             f"🏆 Всего олимпиад: {len(all_sessions)}\n"
             f"🟢 Активных олимпиад: {1 if active_session else 0}\n"
         )
@@ -89,10 +88,11 @@ async def show_students(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
-        classes = await crud.get_all_classes(session)
+    async with AsyncSessionLocal() as session:
+        # Получаем статистику одним запросом вместо N+1
+        stats = await crud.get_classes_statistics(session)
 
-        if not classes:
+        if not stats:
             await callback.message.edit_text(
                 "📝 В базе данных пока нет учеников",
                 reply_markup=get_admin_main_menu()
@@ -100,10 +100,8 @@ async def show_students(callback: CallbackQuery):
             return
 
         text = "👥 Список классов:\n\n"
-        for class_num in classes:
-            students = await crud.get_students_by_class(session, class_num)
-            registered = sum(1 for s in students if s.is_registered)
-            text += f"{class_num} класс: {len(students)} учеников ({registered} зарег.)\n"
+        for class_num, data in stats.items():
+            text += f"{class_num} класс: {data['total']} учеников ({data['registered']} зарег.)\n"
 
     await callback.message.edit_text(
         text + "\n💡 Используйте API для управления учениками",
@@ -169,7 +167,7 @@ async def delete_olympiad_command(message: Message):
         await message.answer("У вас нет доступа к этой команде")
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         sessions = await crud.get_all_sessions(session)
 
         if not sessions:
@@ -196,17 +194,17 @@ async def delete_class_command(message: Message):
         await message.answer("У вас нет доступа к этой команде")
         return
 
-    async with get_async_session() as session:
-        classes = await crud.get_all_classes(session)
+    async with AsyncSessionLocal() as session:
+        # Получаем статистику одним запросом вместо N+1
+        stats = await crud.get_classes_statistics(session)
 
-        if not classes:
+        if not stats:
             await message.answer("📝 В базе данных нет классов")
             return
 
         text = "👥 Список классов:\n\n"
-        for class_num in classes:
-            students = await crud.get_students_by_class(session, class_num)
-            text += f"{class_num} класс: {len(students)} учеников\n"
+        for class_num, data in stats.items():
+            text += f"{class_num} класс: {data['total']} учеников\n"
 
         text += "\n💡 Для удаления класса используйте:\n"
         text += "DELETE /api/admin/classes/{class_number}"
@@ -221,7 +219,7 @@ async def show_olympiads(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         sessions = await crud.get_all_sessions(session)
 
         if not sessions:

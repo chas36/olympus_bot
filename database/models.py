@@ -225,3 +225,68 @@ class NotificationSettings(Base):
 
     def __repr__(self):
         return f"<NotificationSettings(id={self.id}, enabled={self.notifications_enabled}, olympiad_notif={self.olympiad_notifications_enabled})>"
+
+
+# ====================================================================
+# Authentication System
+# ====================================================================
+
+
+class User(Base):
+    """Пользователи системы (администраторы, учителя)"""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(String(50), unique=True, nullable=False, index=True)
+    username = Column(String(100), nullable=True)  # Telegram username
+    full_name = Column(String(200), nullable=True)  # Полное имя из Telegram
+    role = Column(String(50), default='viewer', nullable=False)  # admin, teacher, viewer
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=moscow_now)
+    last_login = Column(DateTime, nullable=True)
+
+    # Relationships
+    auth_tokens = relationship("AuthToken", back_populates="user", cascade="all, delete-orphan")
+    sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<User(id={self.id}, telegram_id='{self.telegram_id}', role='{self.role}', active={self.is_active})>"
+
+
+class AuthToken(Base):
+    """Временные токены авторизации (одноразовые ссылки)"""
+    __tablename__ = "auth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token = Column(String(100), unique=True, nullable=False, index=True)  # Уникальный токен
+    expires_at = Column(DateTime, nullable=False, index=True)  # Время истечения (15 минут)
+    is_used = Column(Boolean, default=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=moscow_now)
+
+    # Relationships
+    user = relationship("User", back_populates="auth_tokens")
+
+    def __repr__(self):
+        return f"<AuthToken(id={self.id}, token='{self.token[:8]}...', used={self.is_used}, expires={self.expires_at})>"
+
+
+class Session(Base):
+    """Пользовательские сессии (после авторизации)"""
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_token = Column(String(100), unique=True, nullable=False, index=True)  # JWT или случайная строка
+    expires_at = Column(DateTime, nullable=False, index=True)  # Время истечения (7 дней)
+    last_activity = Column(DateTime, default=moscow_now)
+    created_at = Column(DateTime, default=moscow_now)
+    user_agent = Column(String(500), nullable=True)  # Для безопасности
+    ip_address = Column(String(50), nullable=True)  # Для безопасности
+
+    # Relationships
+    user = relationship("User", back_populates="sessions")
+
+    def __repr__(self):
+        return f"<Session(id={self.id}, user_id={self.user_id}, expires={self.expires_at})>"
