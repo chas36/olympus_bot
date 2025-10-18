@@ -165,10 +165,9 @@ async def verify_token(
     Вызывается ботом после того, как пользователь подтвердил авторизацию.
     """
 
-    # Ищем токен
+    # Ищем токен (может быть уже использован ботом для подтверждения)
     auth_token = db.query(AuthToken).filter(
         AuthToken.token == verify_request.token,
-        AuthToken.is_used == False,
         AuthToken.expires_at > moscow_now()
     ).first()
 
@@ -178,9 +177,21 @@ async def verify_token(
             detail="Недействительный или истекший токен"
         )
 
-    # Помечаем токен как использованный
-    auth_token.is_used = True
-    auth_token.used_at = moscow_now()
+    # Проверяем, был ли токен уже использован для создания сессии
+    # (not is_used означает что бот подтвердил, но сессия еще не создана)
+    if auth_token.is_used and auth_token.used_at:
+        # Если прошло больше 2 минут с момента подтверждения, токен истек
+        time_since_used = (moscow_now() - auth_token.used_at).total_seconds()
+        if time_since_used > 120:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Токен истек"
+            )
+
+    # Помечаем токен как использованный для создания сессии
+    if not auth_token.is_used:
+        auth_token.is_used = True
+        auth_token.used_at = moscow_now()
 
     # Получаем пользователя
     user = db.query(User).filter(User.id == auth_token.user_id).first()
@@ -286,3 +297,22 @@ async def check_auth(user: Optional[User] = Depends(get_current_user)):
         }
     else:
         return {"authenticated": False}
+
+
+@router.get("/check-token/{token}")
+async def check_token_status(token: str, db: Session = Depends(get_db)):
+    """
+    Проверить статус токена авторизации
+    """
+    auth_token = db.query(AuthToken).filter(
+        AuthToken.token == token,
+        AuthToken.expires_at > moscow_now()
+    ).first()
+
+    if not auth_token:
+        return {"status": "invalid"}
+
+    if auth_token.is_used:
+        return {"status": "confirmed"}
+
+    return {"status": "pending"}

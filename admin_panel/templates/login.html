@@ -277,15 +277,14 @@
         }
 
         function startPolling() {
-            // Проверяем статус авторизации каждые 2 секунды
-            pollingInterval = setInterval(checkAuthStatus, 2000);
+            // Проверяем статус токена каждые 2 секунды
+            pollingInterval = setInterval(checkTokenStatus, 2000);
         }
 
-        async function checkAuthStatus() {
+        async function checkTokenStatus() {
             try {
-                const response = await fetch('/api/auth/check', {
-                    credentials: 'include'
-                });
+                // Проверяем статус токена
+                const response = await fetch(`/api/auth/check-token/${currentToken}`);
 
                 if (!response.ok) {
                     return;
@@ -293,14 +292,40 @@
 
                 const data = await response.json();
 
-                if (data.authenticated) {
-                    // Успешная авторизация!
+                if (data.status === 'confirmed') {
+                    // Токен подтвержден! Теперь вызываем verify для получения сессии
                     stopPolling();
-                    window.location.href = '/';
+                    await verifyAndLogin();
                 }
 
             } catch (error) {
                 console.error('Polling error:', error);
+            }
+        }
+
+        async function verifyAndLogin() {
+            try {
+                const response = await fetch('/api/auth/verify', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ token: currentToken }),
+                    credentials: 'include'
+                });
+
+                if (response.ok) {
+                    // Успешная авторизация!
+                    window.location.href = '/';
+                } else {
+                    showError('Ошибка при создании сессии');
+                    resetLogin();
+                }
+
+            } catch (error) {
+                console.error('Verify error:', error);
+                showError('Ошибка связи с сервером');
+                resetLogin();
             }
         }
 

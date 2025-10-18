@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 import os
-import requests
 
 from database.database import SessionLocal
 from database.models import User, AuthToken, moscow_now
@@ -21,7 +20,6 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
-API_URL = os.getenv("API_URL", "http://localhost:8001")
 
 
 # FSM для добавления пользователя
@@ -94,37 +92,27 @@ async def handle_auth_deeplink(message: Message):
             )
             return
 
-        # Помечаем токен как использованный и отправляем запрос в API
+        # Подтверждаем токен (помечаем как использованный)
         try:
-            response = requests.post(
-                f"{API_URL}/api/auth/verify",
-                json={"token": token},
-                timeout=10
-            )
+            auth_token.is_used = True
+            auth_token.used_at = moscow_now()
+            db.commit()
 
-            if response.status_code == 200:
-                await message.answer(
-                    "✅ <b>Авторизация успешна!</b>\n\n"
-                    "Вы можете вернуться в браузер и продолжить работу с панелью управления.\n\n"
-                    f"Ваша роль: <b>{user.role}</b>",
-                    parse_mode="HTML"
-                )
-                logger.info(f"Пользователь {user.telegram_id} успешно авторизовался")
-            else:
-                await message.answer(
-                    "❌ <b>Ошибка при создании сессии</b>\n\n"
-                    "Попробуйте еще раз или обратитесь к администратору.",
-                    parse_mode="HTML"
-                )
-                logger.error(f"Ошибка API при авторизации: {response.status_code} - {response.text}")
+            await message.answer(
+                "✅ <b>Авторизация подтверждена!</b>\n\n"
+                "Вы можете вернуться в браузер и продолжить работу с панелью управления.\n\n"
+                f"Ваша роль: <b>{user.role}</b>",
+                parse_mode="HTML"
+            )
+            logger.info(f"Пользователь {user.telegram_id} подтвердил авторизацию")
 
         except Exception as e:
             await message.answer(
-                "❌ <b>Ошибка связи с сервером</b>\n\n"
+                "❌ <b>Ошибка при подтверждении</b>\n\n"
                 "Попробуйте еще раз позже.",
                 parse_mode="HTML"
             )
-            logger.error(f"Ошибка при вызове API авторизации: {e}")
+            logger.error(f"Ошибка при подтверждении авторизации: {e}")
 
     finally:
         db.close()
