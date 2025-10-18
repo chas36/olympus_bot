@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 import os
 
 # Импортируем новые роутеры
-from api.routers import students, codes, monitoring, admin, dashboard, notifications, screenshots, auth
+from api.routers import students, codes, monitoring, admin, dashboard, notifications, screenshots, auth, stages
 from api.routers.auth import get_current_user, get_db
 from database.models import User
 from api.middleware import AuthMiddleware
@@ -40,6 +40,7 @@ else:
 
 # Подключаем роутеры
 app.include_router(auth.router)  # Авторизация первой для приоритета
+app.include_router(stages.router)  # Управление этапами
 app.include_router(students.router)
 app.include_router(codes.router)
 app.include_router(monitoring.router)
@@ -69,19 +70,18 @@ async def login_page(request: Request):
 async def root(request: Request, db: Session = Depends(get_db)):
     """
     Главная страница - полнофункциональная админ-панель v2
-    ВРЕМЕННО БЕЗ АВТОРИЗАЦИИ
     """
-    # ВРЕМЕННО: авторизация отключена
-    # user = get_current_user(request, db)
-    # if not user:
-    #     return RedirectResponse(url="/login", status_code=302)
+    # Проверяем авторизацию
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
 
-    # Отображаем панель управления без проверки авторизации
+    # Отображаем панель управления
     return templates.TemplateResponse(
         "dashboard_v2.html",
         {
             "request": request,
-            "user": None  # Временно без пользователя
+            "user": user
         }
     )
 

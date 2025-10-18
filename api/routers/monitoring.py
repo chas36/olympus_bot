@@ -4,7 +4,7 @@ from sqlalchemy import select, func, and_
 from database.database import get_async_session
 from database.models import (
     Student, OlympiadSession, Grade8Code, Grade9Code,
-    CodeRequest, Reminder, OlympiadCode
+    CodeRequest, Reminder, OlympiadCode, OlympiadStage
 )
 
 router = APIRouter(prefix="/api/monitoring", tags=["Monitoring"])
@@ -15,22 +15,37 @@ async def get_dashboard_stats(
     session: AsyncSession = Depends(get_async_session)
 ):
     """Статистика для дашборда"""
-    
+
+    # Активный этап
+    result = await session.execute(
+        select(OlympiadStage).where(OlympiadStage.is_active == True)
+    )
+    active_stage = result.scalar_one_or_none()
+
+    active_stage_data = None
+    if active_stage:
+        active_stage_data = {
+            "id": active_stage.id,
+            "name": active_stage.name,
+            "code": active_stage.code,
+            "description": active_stage.description
+        }
+
     # Ученики
     result = await session.execute(select(func.count(Student.id)))
     total_students = result.scalar()
-    
+
     result = await session.execute(
         select(func.count(Student.id)).where(Student.is_registered == True)
     )
     registered_students = result.scalar()
-    
+
     # Активная сессия
     result = await session.execute(
         select(OlympiadSession).where(OlympiadSession.is_active == True)
     )
     active_session = result.scalar_one_or_none()
-    
+
     active_session_data = None
     if active_session:
         # Статистика по активной сессии (используем универсальную таблицу)
@@ -50,7 +65,7 @@ async def get_dashboard_stats(
             )
         )
         issued_codes = result.scalar()
-        
+
         result = await session.execute(
             select(func.count(CodeRequest.id)).where(
                 and_(
@@ -60,7 +75,7 @@ async def get_dashboard_stats(
             )
         )
         screenshots = result.scalar()
-        
+
         active_session_data = {
             "id": active_session.id,
             "subject": active_session.subject,
@@ -69,12 +84,13 @@ async def get_dashboard_stats(
             "issued_codes": issued_codes,
             "screenshots": screenshots
         }
-    
+
     # Всего сессий
     result = await session.execute(select(func.count(OlympiadSession.id)))
     total_sessions = result.scalar()
-    
+
     return {
+        "active_stage": active_stage_data,
         "students": {
             "total": total_students,
             "registered": registered_students,

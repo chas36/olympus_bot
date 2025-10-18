@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadRecentActivity();
     loadGlobalNotificationStatus();
     loadOlympiadNotificationStatus();
+    loadStages();
 
     // Автообновление каждые 30 секунд
     setInterval(() => {
@@ -76,11 +77,17 @@ async function loadDashboard() {
         // Активная сессия
         if (data.active_session) {
             const session = data.active_session;
-            const progress = session.total_codes > 0 
+            const progress = session.total_codes > 0
                 ? Math.round((session.issued_codes / session.total_codes) * 100)
                 : 0;
-            
+
+            // Добавляем информацию об этапе если есть
+            const stageBadge = data.active_stage
+                ? `<span class="badge bg-info mb-2"><i class="bi bi-layers"></i> ${data.active_stage.name}</span><br>`
+                : '';
+
             const activeHTML = `
+                ${stageBadge}
                 <h4>${session.subject}</h4>
                 <p class="text-muted">${new Date(session.date).toLocaleDateString('ru-RU')}</p>
                 <hr>
@@ -106,7 +113,13 @@ async function loadDashboard() {
             `;
             document.getElementById('activeSessionCard').innerHTML = activeHTML;
         } else {
+            // Показываем текущий этап даже если нет активной сессии
+            const stageBadge = data.active_stage
+                ? `<div class="alert alert-info mb-2"><i class="bi bi-layers"></i> <strong>Текущий этап:</strong> ${data.active_stage.name}</div>`
+                : '';
+
             document.getElementById('activeSessionCard').innerHTML = `
+                ${stageBadge}
                 <div class="alert alert-warning mb-0">
                     <i class="bi bi-exclamation-triangle"></i> Нет активной сессии
                 </div>
@@ -1968,3 +1981,125 @@ document.querySelector('[data-bs-target="#screenshots-tab"]').addEventListener('
     loadScreenshotsStats();
     loadScreenshots();
 });
+
+// ==================== ЭТАПЫ ОЛИМПИАДЫ ====================
+
+// Загрузка и отображение этапов олимпиады
+async function loadStages() {
+    console.log('loadStages: начало загрузки этапов');
+    try {
+        const response = await fetch('/api/stages', {
+            credentials: 'include'  // Важно для передачи cookies с session_token
+        });
+
+        console.log('loadStages: получен ответ', response.status);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('loadStages: ошибка HTTP', response.status, errorText);
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const stages = await response.json();
+        console.log('loadStages: получены этапы', stages);
+
+        // Находим активный этап
+        const activeStage = stages.find(s => s.is_active);
+        if (activeStage) {
+            document.getElementById('currentStageName').textContent = activeStage.name;
+            console.log('loadStages: установлен активный этап', activeStage.name);
+        } else {
+            document.getElementById('currentStageName').textContent = 'Этап не выбран';
+            console.log('loadStages: активный этап не найден');
+        }
+
+        // Заполняем выпадающее меню
+        const stageList = document.getElementById('stageList');
+        if (stages.length === 0) {
+            stageList.innerHTML = '<li><a class="dropdown-item disabled" href="#">Нет доступных этапов</a></li>';
+            return;
+        }
+
+        stageList.innerHTML = stages.map(stage => `
+            <li>
+                <a class="dropdown-item ${stage.is_active ? 'active' : ''}"
+                   href="#"
+                   onclick="switchStage(${stage.id}, '${stage.name}'); return false;">
+                    ${stage.name}
+                    ${stage.is_active ? '<i class="bi bi-check-circle ms-2 text-success"></i>' : ''}
+                </a>
+            </li>
+        `).join('');
+
+        console.log('loadStages: меню обновлено');
+    } catch (error) {
+        console.error('Ошибка при загрузке этапов:', error);
+        document.getElementById('currentStageName').textContent = 'Ошибка загрузки';
+        document.getElementById('stageList').innerHTML = `<li><a class="dropdown-item disabled" href="#">Ошибка: ${error.message}</a></li>`;
+    }
+}
+
+// Переключение этапа олимпиады
+async function switchStage(stageId, stageName) {
+    try {
+        const response = await fetch(`/api/stages/${stageId}/activate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Показываем уведомление об успехе
+        showNotification('success', `Активирован этап: ${stageName}`);
+
+        // Обновляем список этапов
+        await loadStages();
+
+        // Перезагружаем данные дашборда
+        loadDashboard();
+        loadSessions();
+        loadRecentActivity();
+
+    } catch (error) {
+        console.error('Ошибка при переключении этапа:', error);
+        showNotification('error', 'Ошибка при переключении этапа');
+    }
+}
+
+// Вспомогательная функция для отображения уведомлений
+function showNotification(type, message) {
+    // Создаем контейнер для уведомлений если его нет
+    let container = document.getElementById('notificationsContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notificationsContainer';
+        container.style.position = 'fixed';
+        container.style.top = '20px';
+        container.style.right = '20px';
+        container.style.zIndex = '9999';
+        document.body.appendChild(container);
+    }
+
+    // Создаем уведомление
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show`;
+    notification.role = 'alert';
+    notification.innerHTML = `
+        <i class="bi bi-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    container.appendChild(notification);
+
+    // Автоматически удаляем через 5 секунд
+    setTimeout(() => {
+        notification.remove();
+    }, 5000);
+}

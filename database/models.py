@@ -13,6 +13,24 @@ def moscow_now():
     return datetime.now(MOSCOW_TZ).replace(tzinfo=None)
 
 
+class OlympiadStage(Base):
+    """Модель этапа олимпиады (школьный, муниципальный и т.д.)"""
+    __tablename__ = "olympiad_stages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)  # "Школьный этап", "Муниципальный этап"
+    code = Column(String(50), unique=True, nullable=False, index=True)  # "school", "municipal"
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=False)  # Активен ли этап в данный момент
+    created_at = Column(DateTime, default=moscow_now)
+
+    # Relationships
+    sessions = relationship("OlympiadSession", back_populates="stage_ref")
+
+    def __repr__(self):
+        return f"<OlympiadStage(id={self.id}, name='{self.name}', code='{self.code}', active={self.is_active})>"
+
+
 class Student(Base):
     """Модель ученика"""
     __tablename__ = "students"
@@ -48,7 +66,8 @@ class OlympiadSession(Base):
     subject = Column(String(100), nullable=False, index=True)  # Название предмета
     class_number = Column(Integer, nullable=True, index=True)  # Класс (4-11), может быть NULL если коды для разных классов
     date = Column(DateTime, nullable=False, index=True)  # Дата проведения из CSV
-    stage = Column(String(50), nullable=True)  # Этап (школьный, муниципальный, и т.д.)
+    stage = Column(String(50), nullable=True)  # Этап (DEPRECATED: использовать stage_id)
+    stage_id = Column(Integer, ForeignKey("olympiad_stages.id"), nullable=True, index=True)  # Ссылка на этап
     upload_time = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=False)  # По умолчанию неактивна
     uploaded_file_name = Column(String(255), nullable=True)
@@ -56,6 +75,7 @@ class OlympiadSession(Base):
     notification_scheduled_for = Column(DateTime, nullable=True)  # Время запланированной отправки уведомления
 
     # Relationships
+    stage_ref = relationship("OlympiadStage", back_populates="sessions")
     grade8_codes = relationship("Grade8Code", back_populates="session", cascade="all, delete-orphan")
     grade9_codes = relationship("Grade9Code", back_populates="session", cascade="all, delete-orphan")
     code_requests = relationship("CodeRequest", back_populates="session")

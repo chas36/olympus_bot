@@ -27,6 +27,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     # Публичные пути, не требующие авторизации
     PUBLIC_PATHS = [
+        "/",  # Главная страница (сама проверяет авторизацию и редиректит на /login)
         "/login",
         "/api/auth/request-login",
         "/api/auth/verify",

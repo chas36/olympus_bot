@@ -43,12 +43,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         "/openapi.json",
     ]
 
+    # Точные пути (требуют точного совпадения)
+    EXACT_PUBLIC_PATHS = [
+        "/",  # Главная страница (сама проверяет авторизацию внутри)
+    ]
+
     async def dispatch(self, request: Request, call_next):
         # Проверяем, является ли путь публичным
         path = request.url.path
 
-        # Разрешаем доступ к публичным путям
+        # Разрешаем доступ к публичным путям (startswith)
         if any(path.startswith(public_path) for public_path in self.PUBLIC_PATHS):
+            return await call_next(request)
+
+        # Разрешаем доступ к точным путям (exact match)
+        if path in self.EXACT_PUBLIC_PATHS:
             return await call_next(request)
 
         # Проверяем токен сессии
