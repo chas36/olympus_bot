@@ -514,6 +514,16 @@ async def export_session_codes(
 
             codes_by_class_parallel[class_key][parallel].append(code)
 
+    # Группируем нераспределенные коды по классам
+    unassigned_codes_by_class = {}
+    for code in universal_codes:
+        # Код считается нераспределенным, если у него нет студента
+        if not code.student:
+            class_key = code.class_number
+            if class_key not in unassigned_codes_by_class:
+                unassigned_codes_by_class[class_key] = []
+            unassigned_codes_by_class[class_key].append(code)
+
     # Добавляем резервные коды для 8 класса
     reserve_by_parallel = {}
     for reserve_code in reserve_codes:
@@ -600,6 +610,56 @@ async def export_session_codes(
                 # Добавляем в архив
                 folder_name = f"{class_num}_класс"
                 file_name = f"{class_num}{parallel}.xlsx"
+                zip_file.writestr(f"{folder_name}/{file_name}", excel_buffer.getvalue())
+
+        # Создаём файлы с нераспределенными кодами для каждого класса
+        for class_num in sorted(unassigned_codes_by_class.keys()):
+            codes = unassigned_codes_by_class[class_num]
+
+            if codes:  # Создаём файл только если есть нераспределенные коды
+                # Создаём Excel файл для нераспределенных кодов
+                wb = Workbook()
+                ws = wb.active
+                ws.title = f"{class_num} класс"
+
+                # Заголовок
+                ws['A1'] = f"Нераспределенные коды для {class_num} класса - {olympiad.subject}"
+                ws['A1'].font = Font(bold=True, size=14)
+                ws.merge_cells('A1:B1')
+                ws['A1'].alignment = Alignment(horizontal='center')
+
+                # Подзаголовок
+                ws['A2'] = f"Всего кодов: {len(codes)}"
+                ws['A2'].font = Font(italic=True)
+                ws.merge_cells('A2:B2')
+
+                # Заголовки колонок
+                ws['A3'] = "№"
+                ws['B3'] = "Код"
+                ws['A3'].font = Font(bold=True)
+                ws['B3'].font = Font(bold=True)
+                ws['A3'].fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
+                ws['B3'].fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
+
+                # Данные
+                row = 4
+                for idx, code in enumerate(codes, 1):
+                    ws[f'A{row}'] = idx
+                    ws[f'B{row}'] = code.code
+                    row += 1
+
+                # Ширина колонок
+                ws.column_dimensions['A'].width = 10
+                ws.column_dimensions['B'].width = 30
+
+                # Сохраняем во временный буфер
+                excel_buffer = io.BytesIO()
+                wb.save(excel_buffer)
+                excel_buffer.seek(0)
+
+                # Добавляем в архив
+                folder_name = f"{class_num}_класс"
+                file_name = f"{class_num}_нераспределенные.xlsx"
                 zip_file.writestr(f"{folder_name}/{file_name}", excel_buffer.getvalue())
 
     zip_buffer.seek(0)
